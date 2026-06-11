@@ -1,0 +1,20 @@
+# Core
+streamlit>=1.40.0
+requests>=2.31.0
+pandas>=2.1.0
+
+# Charts
+plotly>=5.20.0
+
+# PDF parsing (watchlist financials)
+pdfplumber>=0.11.0
+
+# Excel export
+openpyxl>=3.1.0
+
+# Analisis con Claude
+anthropic>=0.40.0
+python-dotenv>=1.0.0
+
+# Peers internacionales
+yfinance>=0.2.40

@@ -1,0 +1,12 @@
+# Secretos - NUNCA commitear
+.env
+.streamlit/secrets.toml
+
+# Datos locales / generados
+cache/
+*.xlsx
+__pycache__/
+*.pyc
+
+# Legacy v1
+latinex_tracker.py
