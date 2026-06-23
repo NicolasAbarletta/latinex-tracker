@@ -18,11 +18,20 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
-import latinex_api as api
-import financials as fin_mod
-import peers as peers_mod
-import analyst
-from latinex_api import LatinexAPIError
+# Bridge Streamlit Cloud secrets -> environment variables BEFORE importing the
+# data modules (analyst reads ANTHROPIC_API_KEY at import time). Locally the
+# .env file is used instead; this is a no-op when no secrets.toml exists.
+try:
+    for _k, _v in st.secrets.items():
+        os.environ.setdefault(_k, str(_v))
+except Exception:
+    pass
+
+import latinex_api as api  # noqa: E402
+import financials as fin_mod  # noqa: E402
+import peers as peers_mod  # noqa: E402
+import analyst  # noqa: E402
+from latinex_api import LatinexAPIError  # noqa: E402
 
 WATCHLIST_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "watchlist.json")
 
