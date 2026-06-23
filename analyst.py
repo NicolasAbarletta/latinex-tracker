@@ -53,34 +53,34 @@ def build_data_brief(nemo):
     kind = fin_mod.sector_kind(s["sector"], s["industry"])
 
     lines = []
-    lines.append(f"EMPRESA: {q['issuer_name']} (ticker {nemo}, Latinex - Bolsa de Valores de Panama)")
+    lines.append(f"COMPANY: {q['issuer_name']} (ticker {nemo}, Latinex - Panama Stock Exchange)")
     lines.append(f"Sector: {s['sector']} / {s['industry']} | ISIN: {s['isin']} | "
-                 f"Acciones en circulacion: {_fmt(s['shares_outstanding'])}")
-    lines.append(f"Listada desde: {s['listing_date']}")
+                 f"Shares outstanding: {_fmt(s['shares_outstanding'])}")
+    lines.append(f"Listed since: {s['listing_date']}")
 
-    lines.append("\n--- MERCADO (actual) ---")
-    lines.append(f"Precio: ${q['price']} | Variacion dia: {_fmt(q['daily_change_pct'], '%')} | "
+    lines.append("\n--- MARKET (current) ---")
+    lines.append(f"Price: ${q['price']} | Daily change: {_fmt(q['daily_change_pct'], '%')} | "
                  f"YTD: {_fmt(q['ytd_change_pct'], '%')}")
-    lines.append(f"Capitalizacion de mercado: {_fmt_money(q['market_cap'])} | "
-                 f"Volumen promedio: {_fmt(q['avg_volume'])} acciones")
+    lines.append(f"Market cap: {_fmt_money(q['market_cap'])} | "
+                 f"Average volume: {_fmt(q['avg_volume'])} shares")
 
-    # Rango 52 semanas desde el universo
+    # 52-week range from the universe
     try:
         uni = api.get_equity_universe(include_preferred=True)
         row = uni[uni["ticker"] == nemo]
         if not row.empty:
-            lines.append(f"Rango 52 semanas: ${row.iloc[0]['low_52w']} - ${row.iloc[0]['high_52w']}")
+            lines.append(f"52-week range: ${row.iloc[0]['low_52w']} - ${row.iloc[0]['high_52w']}")
     except api.LatinexAPIError:
         pass
 
-    # Dividendos
+    # Dividends
     try:
         divs = api.get_dividends(nemo)
         y = api.get_dividend_yield(divs, q["price"])
-        lines.append("\n--- DIVIDENDOS ---")
-        lines.append(f"Ultimos 12 meses: ordinarios ${_fmt(y['ordinary_12m'])}/accion "
+        lines.append("\n--- DIVIDENDS ---")
+        lines.append(f"Trailing 12 months: ordinary ${_fmt(y['ordinary_12m'])}/share "
                      f"(yield {_fmt(y['ordinary_yield_pct'], '%')}), "
-                     f"total con extraordinarios ${_fmt(y['total_12m'])}/accion "
+                     f"total incl. special ${_fmt(y['total_12m'])}/share "
                      f"(yield {_fmt(y['total_yield_pct'], '%')})")
         if not divs.empty:
             recent = divs.head(8)
@@ -90,55 +90,55 @@ def build_data_brief(nemo):
     except api.LatinexAPIError:
         pass
 
-    # Financials parseados (puede fallar para PDFs escaneados)
+    # Parsed financials (may fail for scanned PDFs)
     fin = fin_mod.get_financials(nemo, issuer_code=q["issuer_code"])
     if fin["error"]:
-        lines.append(f"\n--- ESTADOS FINANCIEROS: NO DISPONIBLES ({fin['error']}) ---")
-        lines.append("NOTA: analiza SOLO con datos de mercado y dividendos; "
-                     "se explicito sobre esta limitacion.")
+        lines.append(f"\n--- FINANCIAL STATEMENTS: NOT AVAILABLE ({fin['error']}) ---")
+        lines.append("NOTE: analyze ONLY with market and dividend data; "
+                     "be explicit about this limitation.")
     else:
         r = fin_mod.compute_ratios(fin, q["price"], s["shares_outstanding"])
-        lines.append(f"\n--- VALORACION (del reporte {fin['report_name']}) ---")
-        lines.append(f"EPS anualizado: ${_fmt(r['eps'])} | P/E: {_fmt(r['pe'])} | "
+        lines.append(f"\n--- VALUATION (from report {fin['report_name']}) ---")
+        lines.append(f"Annualized EPS: ${_fmt(r['eps'])} | P/E: {_fmt(r['pe'])} | "
                      f"BVPS: ${_fmt(r['bvps'])} | P/B: {_fmt(r['pb'])}")
         lines.append(f"ROE: {_fmt(r['roe_pct'], '%')} | ROA: {_fmt(r['roa_pct'], '%')} | "
-                     f"Patrimonio/Activos: {_fmt(r['equity_to_assets_pct'], '%')}")
+                     f"Equity/Assets: {_fmt(r['equity_to_assets_pct'], '%')}")
         if r["note"]:
-            lines.append(f"Nota: {r['note']}")
+            lines.append(f"Note: {r['note']}")
 
         sector_rows = fin_mod.compute_sector_ratios(fin, kind)
         if sector_rows:
-            lines.append(f"\n--- RATIOS SECTORIALES ({kind}) ---")
+            lines.append(f"\n--- SECTOR RATIOS ({kind}) ---")
             for label, val, help_text in sector_rows:
                 lines.append(f"{label}: {val}  [{help_text}]")
 
         hist = fin_mod.get_historical(nemo, issuer_code=q["issuer_code"])
         if not hist["table"].empty:
-            lines.append("\n--- HISTORICO ANUAL (USD completos, auditado) ---")
+            lines.append("\n--- ANNUAL HISTORY (full USD, audited) ---")
             t = hist["table"].copy()
-            cols = [c for c in t.columns if c != "Metrica"]
+            cols = [c for c in t.columns if c != "Metric"]
             for _, row in t.iterrows():
                 vals = " | ".join(f"{c}: {_fmt_money(row[c])}" for c in cols)
-                lines.append(f"{row['Metrica']}: {vals}")
+                lines.append(f"{row['Metric']}: {vals}")
             if hist["errors"]:
-                lines.append(f"Avisos: {'; '.join(hist['errors'])}")
+                lines.append(f"Notes: {'; '.join(hist['errors'])}")
 
-    # Hechos relevantes
+    # Material disclosures (hechos relevantes)
     try:
         issuer_key = (q["issuer_name"].split(",")[0] if q["issuer_name"] else nemo)
         nots = api.get_notices(issuer_filter=issuer_key)
         if not nots.empty:
-            lines.append("\n--- HECHOS RELEVANTES RECIENTES ---")
+            lines.append("\n--- RECENT MATERIAL DISCLOSURES ---")
             for _, n in nots.head(8).iterrows():
                 lines.append(f"{n['date']}: {n['title']}")
     except api.LatinexAPIError:
         pass
 
-    # Peers internacionales
+    # International peers
     try:
         pdf_ = peers_mod.get_peer_metrics(kind)
         if not pdf_.empty:
-            lines.append(f"\n--- PEERS INTERNACIONALES ({kind}, via Yahoo Finance) ---")
+            lines.append(f"\n--- INTERNATIONAL PEERS ({kind}, via Yahoo Finance) ---")
             for _, p in pdf_.iterrows():
                 lines.append(
                     f"{p['ticker']} ({p['name']}, {p['country']}): "
@@ -151,36 +151,36 @@ def build_data_brief(nemo):
     return "\n".join(lines), context
 
 
-PROMPT_TEMPLATE = """Eres un analista de equity senior que cubre el mercado de valores panameno (Latinex). \
-Un inversionista local sofisticado te pide un analisis de {name} ({nemo}).
+PROMPT_TEMPLATE = """You are a senior equity analyst covering the Panamanian stock market (Latinex). \
+A sophisticated local investor asks you for an analysis of {name} ({nemo}).
 
-DATOS REALES (unica fuente permitida -- NO inventes ni estimes cifras que no esten aqui):
+REAL DATA (the only allowed source -- do NOT invent or estimate figures that are not here):
 
 {brief}
 
-Escribe un analisis en espanol, formato Markdown, ~500-700 palabras, que CUENTE LA HISTORIA \
-del negocio con los numeros. Estructura:
+Write the analysis in English, Markdown format, ~500-700 words, telling the STORY of the \
+business with the numbers. Structure:
 
-## Trayectoria
-Como evoluciono el negocio 2023->hoy (crecimiento de utilidades, activos, ingresos -- cita cifras y calcula variaciones %).
+## Trajectory
+How the business evolved 2023->today (growth in earnings, assets, revenue -- cite figures and compute % changes).
 
-## Drivers y rentabilidad
-Que mueve los resultados; margenes/ratios sectoriales y que dicen del negocio.
+## Drivers and profitability
+What moves results; sector margins/ratios and what they say about the business.
 
-## Solidez de balance
-Capitalizacion, apalancamiento, calidad del balance.
+## Balance-sheet strength
+Capitalization, leverage, balance-sheet quality.
 
-## Dividendos y retorno al accionista
-Politica de dividendos observada, yield, sostenibilidad (payout vs utilidades).
+## Dividends and shareholder return
+Observed dividend policy, yield, sustainability (payout vs earnings).
 
-## Valoracion relativa
-P/E, P/B vs los peers internacionales del brief: esta cara o barata y por que podria justificarse el descuento/premio (liquidez del mercado local, tamano, riesgo pais).
+## Relative valuation
+P/E, P/B vs the international peers in the brief: is it cheap or expensive, and why might the discount/premium be justified (local market liquidity, size, country risk).
 
-## Riesgos y que vigilar
-3-4 riesgos concretos y senales a monitorear (usa los hechos relevantes si aportan).
+## Risks and what to watch
+3-4 concrete risks and signals to monitor (use the material disclosures if relevant).
 
-Reglas: cifras EXACTAS del brief (puedes redondear a millones con un decimal); si un dato no esta, dilo; \
-se directo y con opinion fundamentada, no promocional; los porcentajes de variacion calculalos tu a partir de las cifras del brief."""
+Rules: EXACT figures from the brief (you may round to millions with one decimal); if a datum is missing, say so; \
+be direct and opinionated, not promotional; compute the % changes yourself from the brief figures."""
 
 
 def generate_analysis(nemo, brief=None, context=None):
@@ -223,6 +223,131 @@ def generate_analysis(nemo, brief=None, context=None):
     except Exception as e:
         out["error"] = f"Error generando analisis: {e}"
         log.error(f"[Claude] {nemo}: {e}")
+    return out
+
+
+# ---------------------------------------------------------------------------
+# Deep dive (structured, McKinsey-style) -- feeds the Company Deep Dive page
+# ---------------------------------------------------------------------------
+
+def _fmt_pct(v):
+    return "n/d" if v is None or (isinstance(v, float) and pd.isna(v)) else f"{v}%"
+
+
+def build_dupont_brief(nemo, context=None):
+    """Text block describing the ROE value-driver tree for the deep-dive prompt.
+
+    Returns (text, dupont_dict). dupont_dict is the raw decomposition so the
+    UI can draw the tree from numbers, not from the model's prose.
+    """
+    if context is None:
+        q = api.get_quote(nemo)
+        s = api.get_summary(nemo)
+        kind = fin_mod.sector_kind(s["sector"], s["industry"])
+    else:
+        q, s, kind = context["quote"], context["summary"], context["kind"]
+
+    fin = fin_mod.get_financials(nemo, issuer_code=q["issuer_code"])
+    if fin["error"]:
+        return f"\n--- ROE TREE: no disponible ({fin['error']}) ---", {}
+    d = fin_mod.dupont_decomposition(fin, kind)
+
+    lines = ["\n--- ROE DECOMPOSITION (DuPont, annualized) ---",
+             "ROE = ROA x Leverage ; ROA = Net margin x Asset yield",
+             f"ROE: {_fmt_pct(d['roe_pct'])} | ROA: {_fmt_pct(d['roa_pct'])} | "
+             f"Leverage (assets/equity): {_fmt(d['leverage_x'], 'x')}",
+             f"Net margin: {_fmt_pct(d['net_margin_pct'])} | "
+             f"Asset yield (revenue/assets): {_fmt_pct(d['asset_yield_pct'])}",
+             f"Bank levers -> NIM: {_fmt_pct(d['nim_pct'])} | "
+             f"Fees/assets: {_fmt_pct(d['fee_to_assets_pct'])} | "
+             f"Efficiency (cost/income): {_fmt_pct(d['cost_income_pct'])} | "
+             f"Cost of risk: {_fmt_pct(d['cost_of_risk_pct'])} | "
+             f"Effective tax: {_fmt_pct(d['effective_tax_pct'])}"]
+    if d.get("note"):
+        lines.append(f"Note: {d['note']}")
+    return "\n".join(lines), d
+
+
+DEEP_DIVE_PROMPT = """You are a strategy consultant (McKinsey style) and equity analyst \
+covering Latinex (Panama Stock Exchange). Prepare a "deep dive" on {name} ({nemo}).
+
+REAL DATA (the only allowed source -- do NOT invent figures):
+
+{brief}
+
+Return ONLY a valid JSON object (no text before or after, no ``` ) with this EXACT shape:
+{{
+  "verdict": "short 2-4 word label (e.g. 'Quality compounder', 'Cyclical value', 'Value trap')",
+  "verdict_tone": "good | neutral | bad",
+  "executive_summary": "2-3 sentences synthesizing the thesis using real figures",
+  "scorecard": [
+    {{"dimension": "Profitability", "grade": "A-", "score": 82, "rationale": "one sentence"}},
+    {{"dimension": "Growth", "grade": "B", "score": 68, "rationale": "one sentence"}},
+    {{"dimension": "Balance sheet", "grade": "A", "score": 88, "rationale": "one sentence"}},
+    {{"dimension": "Capital return", "grade": "B", "score": 71, "rationale": "one sentence"}},
+    {{"dimension": "Valuation", "grade": "C+", "score": 55, "rationale": "one sentence"}}
+  ],
+  "strengths": [{{"title": "short title", "detail": "one sentence with a figure"}}],
+  "weaknesses": [{{"title": "short title", "detail": "one sentence with a figure"}}]
+}}
+
+Rules: write everything in English; 4-6 strengths and 4-6 weaknesses; score 0-100 consistent with the grade; \
+EXACT figures from the brief; if financial statements are unavailable, base the scorecard on market/dividend \
+data and say so in the rationales."""
+
+
+def generate_deep_dive(nemo):
+    """Structured McKinsey-style deep dive. Returns dict:
+    {error, model, data, dupont, narrative}. `data` is the parsed JSON above;
+    `dupont` is the raw ROE-tree decomposition; `narrative` is the long-form
+    markdown analysis (reuses generate_analysis)."""
+    import json as _json
+
+    out = {"error": None, "model": MODEL, "data": None, "dupont": {}, "narrative": ""}
+    if not ANTHROPIC_API_KEY:
+        out["error"] = ("ANTHROPIC_API_KEY no configurada. Copia el .env del "
+                        "taleb-dashboard a la carpeta latinex-tracker.")
+        return out
+
+    try:
+        brief, context = build_data_brief(nemo)
+        dupont_text, dupont = build_dupont_brief(nemo, context=context)
+        out["dupont"] = dupont
+        full_brief = brief + "\n" + dupont_text
+        name = context.get("quote", {}).get("issuer_name", nemo)
+
+        client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+        msg = client.messages.create(
+            model=MODEL,
+            max_tokens=4000,
+            messages=[{"role": "user",
+                       "content": DEEP_DIVE_PROMPT.format(name=name, nemo=nemo, brief=full_brief)}],
+        )
+        text = next((b.text for b in msg.content if b.type == "text"), "").strip()
+        # Be tolerant of stray code fences / prose around the JSON.
+        if text.startswith("```"):
+            text = text.strip("`")
+            text = text[text.find("{"):]
+        start, end = text.find("{"), text.rfind("}")
+        if start != -1 and end != -1:
+            out["data"] = _json.loads(text[start:end + 1])
+        else:
+            out["error"] = "El modelo no devolvio JSON valido para el deep dive."
+
+        # Long-form narrative reuses the existing analysis (same real brief).
+        narr = generate_analysis(nemo, brief=brief, context=context)
+        out["narrative"] = narr.get("text", "")
+    except _json.JSONDecodeError as e:
+        out["error"] = f"No se pudo parsear el JSON del deep dive: {e}"
+    except anthropic.AuthenticationError:
+        out["error"] = "API key invalida (AuthenticationError)."
+    except anthropic.RateLimitError:
+        out["error"] = "Limite de tasa alcanzado -- intenta de nuevo en unos minutos."
+    except anthropic.APIStatusError as e:
+        out["error"] = f"Error del API de Anthropic ({e.status_code}): {e.message}"
+    except Exception as e:
+        out["error"] = f"Error generando deep dive: {e}"
+        log.error(f"[deep-dive] {nemo}: {e}")
     return out
 
 

@@ -1,0 +1,652 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Latinex Equity Tracker</title>
+<style>
+  :root{
+    --azul:#0B3D66; --azul-2:#11507F; --azul-soft:#DBEAFE; --azul-tint:#EEF4FA;
+    --bg:#F1F5F9; --panel:#FFFFFF; --line:#E2E8F0; --line-2:#EDF2F7;
+    --ink:#1A202C; --ink-2:#475569; --muted:#64748B; --muted-2:#94A3B8;
+    --verde:#15803D; --verde-bg:#DCFCE7; --rojo:#B91C1C; --rojo-bg:#FEE2E2;
+    --amber:#B45309; --amber-bg:#FEF3C7;
+    --radius:14px;
+    --shadow:0 1px 3px rgba(11,61,102,.06), 0 1px 2px rgba(11,61,102,.04);
+    --shadow-lg:0 10px 30px rgba(11,61,102,.10);
+    --font:"Segoe UI",-apple-system,BlinkMacSystemFont,Roboto,Helvetica,Arial,sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%}
+  body{font-family:var(--font);background:var(--bg);color:var(--ink);font-size:14px;-webkit-font-smoothing:antialiased;font-variant-numeric:tabular-nums}
+  .app{display:flex;min-height:100vh}
+
+  /* ---------------- Sidebar ---------------- */
+  .sidebar{width:248px;flex:0 0 248px;background:var(--panel);border-right:1px solid var(--line);padding:20px 16px;display:flex;flex-direction:column;gap:18px;position:sticky;top:0;height:100vh}
+  .brand{display:flex;gap:11px;align-items:center}
+  .brand .mark{width:36px;height:36px;border-radius:9px;flex:0 0 36px;background:linear-gradient(145deg,var(--azul),var(--azul-2));color:#fff;display:grid;place-items:center;font-weight:800;font-size:17px;box-shadow:0 2px 6px rgba(11,61,102,.25)}
+  .brand .txt b{display:block;color:var(--azul);font-size:14.5px;line-height:1.15;font-weight:800}
+  .brand .txt span{display:block;color:var(--muted);font-size:11px;margin-top:2px}
+  .refresh{border:1px solid var(--line);background:#fff;color:var(--azul);border-radius:9px;padding:9px 12px;font-size:12.5px;font-weight:600;display:flex;align-items:center;gap:8px;cursor:pointer;width:100%;transition:.15s}
+  .refresh:hover{background:var(--azul-tint);border-color:#cdddee}
+  .refresh .dot{width:7px;height:7px;border-radius:50%;background:var(--verde);box-shadow:0 0 0 3px var(--verde-bg)}
+  .nav{display:flex;flex-direction:column;gap:2px}
+  .nav a{display:flex;align-items:center;gap:11px;padding:9px 11px;border-radius:9px;color:var(--ink-2);text-decoration:none;font-size:13px;font-weight:500;cursor:pointer;transition:.12s}
+  .nav a svg{width:17px;height:17px;stroke:currentColor;fill:none;stroke-width:1.7;flex:0 0 17px}
+  .nav a:hover{background:var(--azul-tint);color:var(--azul)}
+  .nav a.active{background:var(--azul);color:#fff;font-weight:600;box-shadow:0 2px 8px rgba(11,61,102,.22)}
+  .sep{height:1px;background:var(--line);margin:2px 0}
+  .side-h{font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted-2);font-weight:700;margin-bottom:9px}
+  .wl-item{display:flex;align-items:center;gap:9px;padding:6px 8px;border-radius:8px;cursor:pointer}
+  .wl-item:hover{background:var(--azul-tint)}
+  .wl-tk{font-size:10.5px;font-weight:700;color:var(--azul);background:var(--azul-soft);border-radius:5px;padding:2px 6px;min-width:48px;text-align:center}
+  .wl-nm{font-size:12px;color:var(--ink-2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .side-foot{margin-top:auto;font-size:11px;color:var(--muted-2);line-height:1.5}
+  .side-foot b{color:var(--muted)}
+
+  /* ---------------- Main ---------------- */
+  .main{flex:1;min-width:0;padding:26px 34px 60px}
+  .topbar{display:flex;justify-content:space-between;align-items:flex-start;gap:20px;margin-bottom:20px}
+  .topbar h1{font-size:23px;color:var(--azul);font-weight:800;letter-spacing:-.01em}
+  .topbar p{color:var(--muted);font-size:13px;margin-top:5px;max-width:640px}
+  .data-pill{display:flex;align-items:center;gap:8px;white-space:nowrap;background:#fff;border:1px solid var(--line);border-radius:20px;padding:7px 13px;font-size:11.5px;color:var(--ink-2);box-shadow:var(--shadow)}
+  .data-pill .dot{width:7px;height:7px;border-radius:50%;background:var(--verde)}
+
+  .tabs{display:flex;gap:4px;background:#fff;border:1px solid var(--line);border-radius:11px;padding:4px;width:max-content;box-shadow:var(--shadow)}
+  .tabs button{border:0;background:transparent;font-family:inherit;font-size:13px;font-weight:600;color:var(--ink-2);padding:8px 16px;border-radius:8px;cursor:pointer;transition:.12s}
+  .tabs button:hover{color:var(--azul)}
+  .tabs button.active{background:var(--azul);color:#fff;box-shadow:0 2px 6px rgba(11,61,102,.2)}
+  .sector-tabs{margin-bottom:18px}
+  .view-tabs{margin:0 0 22px}
+
+  /* KPI strip */
+  .kpis{display:grid;gap:14px;margin-bottom:22px}
+  .kpis.k5{grid-template-columns:repeat(5,1fr)}
+  .kpis.k4{grid-template-columns:repeat(4,1fr)}
+  .kpi{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:15px 16px;box-shadow:var(--shadow);position:relative;overflow:hidden}
+  .kpi::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--azul);opacity:.85}
+  .kpi.good::before{background:var(--verde)} .kpi.bad::before{background:var(--rojo)}
+  .kpi .lab{font-size:11px;color:var(--muted);font-weight:600}
+  .kpi .val{font-size:25px;font-weight:800;color:var(--ink);margin-top:7px;line-height:1}
+  .kpi .sub{margin-top:9px;display:flex;align-items:center;gap:7px}
+  .delta{font-size:11px;font-weight:700;border-radius:6px;padding:2px 7px;display:inline-flex;align-items:center;gap:3px}
+  .delta.up{color:var(--verde);background:var(--verde-bg)} .delta.down{color:var(--rojo);background:var(--rojo-bg)} .delta.flat{color:var(--muted);background:#F1F5F9}
+  .kpi .sub small{font-size:10.5px;color:var(--muted-2)}
+
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow)}
+  .card-h{padding:16px 20px;border-bottom:1px solid var(--line-2);display:flex;justify-content:space-between;align-items:center;gap:12px}
+  .card-h h3{font-size:15px;color:var(--azul);font-weight:700}
+  .card-h .hint{font-size:11.5px;color:var(--muted)}
+
+  table{border-collapse:collapse;width:100%}
+  thead th{font-size:10.5px;letter-spacing:.05em;text-transform:uppercase;color:var(--muted);font-weight:700;text-align:right;padding:12px 16px;border-bottom:1px solid var(--line);background:#FBFCFE}
+  thead th:first-child{text-align:left}
+  tbody td{padding:12px 16px;text-align:right;border-bottom:1px solid var(--line-2);font-size:13.5px;color:var(--ink)}
+  tbody td:first-child{text-align:left}
+  tbody tr:last-child td{border-bottom:0}
+  tbody tr:hover{background:#FAFCFE}
+  .co{display:flex;align-items:center;gap:11px}
+  .co .tk{font-size:10.5px;font-weight:800;color:var(--azul);background:var(--azul-soft);border-radius:6px;padding:3px 7px;min-width:50px;text-align:center}
+  .co .nm{font-weight:600;color:var(--ink)}
+  .co .flag{font-size:14px}
+  tr.local{background:var(--azul-tint)} tr.local:hover{background:#E6EFF8}
+  tr.local td:first-child{box-shadow:inset 3px 0 0 var(--azul)} tr.local .nm{color:var(--azul)}
+  .badge-local{font-size:9.5px;font-weight:800;color:#fff;background:var(--azul);border-radius:5px;padding:2px 6px;letter-spacing:.04em}
+  tr.median td{background:#F8FAFC;font-weight:700;color:var(--ink-2);border-top:1px solid var(--line)}
+  tr.median .co .nm{color:var(--ink-2);font-weight:700}
+  .cell-good{color:var(--verde);font-weight:700} .cell-bad{color:var(--rojo);font-weight:700}
+  .pos{color:var(--verde);font-weight:600} .neg{color:var(--rojo);font-weight:600}
+
+  /* range bar in market table */
+  .range{position:relative;width:96px;height:8px;background:#EEF2F7;border-radius:5px;display:inline-block;vertical-align:middle}
+  .range>i{position:absolute;top:-2px;width:4px;height:12px;border-radius:2px;background:var(--azul)}
+
+  .callout{margin:0;display:flex;gap:12px;align-items:flex-start;background:linear-gradient(180deg,#FBFDFF,#F4F8FC);border-top:1px solid var(--line-2);padding:16px 20px;font-size:12.5px;color:var(--ink-2);line-height:1.55}
+  .callout .ic{flex:0 0 30px;width:30px;height:30px;border-radius:8px;background:var(--azul-soft);color:var(--azul);display:grid;place-items:center;font-weight:800;font-size:15px}
+  .callout b{color:var(--azul)}
+
+  /* ---- valuation map (Comparables B) ---- */
+  .map-wrap{display:grid;grid-template-columns:1.55fr 1fr;gap:18px}
+  .map-card{padding:18px 18px 14px}
+  .map-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px}
+  .map-head h3{font-size:15px;color:var(--azul);font-weight:700}
+  .legend{display:flex;gap:14px;font-size:11px;color:var(--muted)}
+  .legend i{width:9px;height:9px;border-radius:50%;display:inline-block;margin-right:5px;vertical-align:middle}
+  svg .grid-line{stroke:var(--line);stroke-width:1}
+  svg .axis-txt{fill:var(--muted-2);font-size:10px;font-family:var(--font)}
+  svg .axis-title{fill:var(--ink-2);font-size:11px;font-weight:600;font-family:var(--font)}
+  svg .quad-txt{fill:#9aa7b6;font-size:10.5px;font-weight:700;font-family:var(--font);letter-spacing:.03em}
+  .bubble-lab{fill:var(--ink-2);font-size:10.5px;font-weight:700;font-family:var(--font)}
+  .detail .d-head{padding:16px 18px;border-bottom:1px solid var(--line-2);display:flex;align-items:center;gap:12px}
+  .d-head .tk{font-size:11px;font-weight:800;color:#fff;background:var(--azul);border-radius:7px;padding:5px 9px}
+  .d-head .nm{font-weight:800;font-size:15.5px;color:var(--ink)}
+  .d-head .cap{font-size:11px;color:var(--muted);margin-top:1px}
+  .d-twin{display:grid;grid-template-columns:1fr 1fr}
+  .d-twin .box{padding:16px 18px;text-align:center}
+  .d-twin .box:first-child{border-right:1px solid var(--line-2)}
+  .d-twin .box .l{font-size:11px;color:var(--muted);font-weight:600}
+  .d-twin .box .v{font-size:30px;font-weight:800;color:var(--azul);margin-top:4px;line-height:1}
+  .d-twin .box .d{margin-top:6px}
+  .d-note{padding:14px 18px;border-top:1px solid var(--line-2);font-size:12px;color:var(--ink-2);line-height:1.55;background:#FBFDFF}
+  .d-note b{color:var(--azul)}
+  .ratio-list{padding:6px 18px 16px}
+  .ratio-list .rh{font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted-2);font-weight:700;padding:12px 0 8px}
+  .rrow{display:grid;grid-template-columns:84px 1fr 46px;gap:10px;align-items:center;padding:5px 0}
+  .rrow .rl{font-size:12px;color:var(--ink-2)} .rrow .rv{font-size:12px;font-weight:700;color:var(--ink);text-align:right}
+  .bar{height:7px;border-radius:4px;background:#EEF2F7;overflow:hidden}
+  .bar>span{display:block;height:100%;border-radius:4px;background:linear-gradient(90deg,var(--azul-2),var(--azul))}
+
+  /* ---- small multiples (Comparables C) ---- */
+  .sm-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}
+  .sm{padding:16px 18px}
+  .sm .sm-h{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:14px}
+  .sm .sm-h .t{font-size:13px;font-weight:700;color:var(--azul)} .sm .sm-h .u{font-size:10.5px;color:var(--muted-2)}
+  .row{display:grid;grid-template-columns:54px 1fr 56px;gap:9px;align-items:center;margin-bottom:9px}
+  .row .rtk{font-size:11px;font-weight:700;color:var(--muted)} .row.is-local .rtk{color:var(--azul)}
+  .track{height:18px;background:#F1F5F9;border-radius:6px;position:relative;overflow:hidden}
+  .track>span{position:absolute;left:0;top:0;bottom:0;border-radius:6px;background:#CBD5E1}
+  .row.is-local .track>span{background:linear-gradient(90deg,var(--azul-2),var(--azul))}
+  .row .rval{font-size:11.5px;font-weight:700;color:var(--ink);text-align:right} .row.is-local .rval{color:var(--azul)}
+  .median-mark{position:absolute;top:-2px;bottom:-2px;width:2px;background:var(--rojo);opacity:.55}
+  .sm-foot{margin-top:10px;font-size:10.5px;color:var(--muted-2);display:flex;align-items:center;gap:6px}
+  .sm-foot i{width:14px;height:2px;background:var(--rojo);opacity:.55;display:inline-block}
+
+  /* ---- Market: order book / depth ---- */
+  .grid-2{display:grid;grid-template-columns:1.5fr 1fr;gap:18px}
+  .depth{padding:0}
+  .depth-h{padding:14px 18px;border-bottom:1px solid var(--line-2)}
+  .depth-h .sel{display:flex;align-items:center;gap:10px}
+  .depth-h .sel .tk{font-size:11px;font-weight:800;color:#fff;background:var(--azul);border-radius:6px;padding:4px 8px}
+  .depth-h .sel .nm{font-weight:700;color:var(--ink)}
+  .spread{margin-top:10px;display:flex;justify-content:space-between;font-size:11px;color:var(--muted)}
+  .spread b{color:var(--ink)}
+  .ladder{display:grid;grid-template-columns:1fr 1fr;gap:0}
+  .ladder .side-h2{font-size:10.5px;letter-spacing:.05em;text-transform:uppercase;font-weight:700;padding:10px 14px;color:var(--muted)}
+  .ladder .bidc .side-h2{color:var(--verde)} .ladder .askc .side-h2{color:var(--rojo)}
+  .ladder .askc{border-left:1px solid var(--line-2)}
+  .lvl{position:relative;display:flex;justify-content:space-between;align-items:center;padding:7px 14px;font-size:12px;z-index:1}
+  .lvl .px{font-weight:700} .lvl .qty{color:var(--muted-2);font-size:11px}
+  .lvl .fill{position:absolute;top:1px;bottom:1px;z-index:-1;border-radius:4px}
+  .bidc .lvl .px{color:var(--verde)} .bidc .lvl .fill{right:0;background:var(--verde-bg)}
+  .askc .lvl .px{color:var(--rojo)} .askc .lvl .fill{left:0;background:var(--rojo-bg)}
+
+  /* ---- Deep Dive ---- */
+  .dd-head{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow);padding:18px 22px;margin-bottom:18px}
+  .dd-head .l{display:flex;gap:14px;align-items:center}
+  .dd-head .tk{font-size:13px;font-weight:800;color:#fff;background:var(--azul);border-radius:9px;padding:8px 11px}
+  .dd-head .nm{font-size:19px;font-weight:800;color:var(--ink)}
+  .dd-head .cap{font-size:12px;color:var(--muted);margin-top:2px}
+  .verdict{display:inline-flex;align-items:center;gap:8px;background:var(--verde-bg);color:var(--verde);font-weight:800;font-size:12.5px;padding:8px 13px;border-radius:10px}
+  .dd-exec{font-size:13px;color:var(--ink-2);line-height:1.6;margin-top:12px;max-width:980px}
+  .dd-exec b{color:var(--azul)}
+
+  .scorecard{display:grid;grid-template-columns:repeat(5,1fr);gap:14px;margin-bottom:18px}
+  .score{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow);padding:15px 16px}
+  .score .l{font-size:11px;color:var(--muted);font-weight:600}
+  .score .row2{display:flex;align-items:baseline;justify-content:space-between;margin-top:8px}
+  .score .grade{font-size:22px;font-weight:800}
+  .score .num{font-size:12px;color:var(--muted-2);font-weight:700}
+  .score .meter{height:7px;background:#EEF2F7;border-radius:5px;overflow:hidden;margin-top:10px}
+  .score .meter>span{display:block;height:100%;border-radius:5px}
+
+  .sw-grid{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-bottom:18px}
+  .sw .card-h h3{display:flex;align-items:center;gap:9px}
+  .sw .dot{width:9px;height:9px;border-radius:50%}
+  .sw ul{list-style:none;padding:8px 8px 14px}
+  .sw li{display:flex;gap:11px;padding:10px 12px;border-radius:9px;font-size:13px;line-height:1.45;color:var(--ink-2)}
+  .sw li:hover{background:#FAFCFE}
+  .sw li .ic{flex:0 0 20px;width:20px;height:20px;border-radius:50%;display:grid;place-items:center;font-size:12px;font-weight:800;margin-top:1px}
+  .sw li b{color:var(--ink)}
+  .good-ic{background:var(--verde-bg);color:var(--verde)} .bad-ic{background:var(--amber-bg);color:var(--amber)}
+
+  .tree-card{padding:18px 20px 8px;margin-bottom:18px;overflow-x:auto}
+  .tree-legend{display:flex;gap:18px;font-size:11px;color:var(--muted);margin:6px 2px 4px}
+  .tree-legend i{width:10px;height:10px;border-radius:3px;display:inline-block;margin-right:6px;vertical-align:middle}
+
+  .trend-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}
+  .trend{padding:16px 18px}
+  .trend .t{font-size:12px;color:var(--muted);font-weight:600}
+  .trend .big{font-size:24px;font-weight:800;color:var(--ink);margin-top:4px}
+  .trend .bars{display:flex;align-items:flex-end;gap:10px;height:64px;margin-top:12px}
+  .trend .bars .b{flex:1;display:flex;flex-direction:column;align-items:center;gap:5px}
+  .trend .bars .b .col{width:100%;border-radius:5px 5px 0 0;background:linear-gradient(180deg,var(--azul-2),var(--azul))}
+  .trend .bars .b:last-child .col{background:linear-gradient(180deg,#2563EB,#0B3D66)}
+  .trend .bars .b .yr{font-size:10px;color:var(--muted-2)}
+
+  .hidden{display:none}
+  .page{display:none} .page.active{display:block}
+  .foot-note{margin-top:26px;font-size:11.5px;color:var(--muted-2);line-height:1.5;max-width:820px}
+</style>
+</head>
+<body>
+<div class="app">
+
+  <!-- ===================== SIDEBAR ===================== -->
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="mark">L</div>
+      <div class="txt"><b>Latinex Equity Tracker</b><span>Latin American Stock Exchange · Panama</span></div>
+    </div>
+    <button class="refresh"><span class="dot"></span> Refresh data</button>
+    <nav class="nav" id="nav">
+      <a data-page="market"><svg viewBox="0 0 24 24"><path d="M3 3v18h18"/><path d="M7 14l4-4 3 3 5-6"/></svg> Market</a>
+      <a data-page="deepdive"><svg viewBox="0 0 24 24"><rect x="3" y="8" width="7" height="13" rx="1"/><rect x="14" y="3" width="7" height="18" rx="1"/></svg> Company Deep Dive</a>
+      <a data-page="comparables" class="active"><svg viewBox="0 0 24 24"><path d="M12 3v18"/><path d="M5 7l-2 5h6l-2-5"/><path d="M19 7l-2 5h6l-2-5"/><path d="M3 12a3 3 0 0 0 6 0"/><path d="M15 12a3 3 0 0 0 6 0"/></svg> Comparables</a>
+      <a data-page="export"><svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></svg> Export</a>
+    </nav>
+    <div class="sep"></div>
+    <div>
+      <div class="side-h">Watchlist</div>
+      <div class="wl-item"><span class="wl-tk">BGFG</span><span class="wl-nm">Banco General</span></div>
+      <div class="wl-item"><span class="wl-tk">ASSA</span><span class="wl-nm">Grupo ASSA</span></div>
+      <div class="wl-item"><span class="wl-tk">EGIN</span><span class="wl-nm">Empresa General Inv.</span></div>
+      <div class="wl-item"><span class="wl-tk">MHCH</span><span class="wl-nm">Grupo Melo</span></div>
+      <div class="wl-item"><span class="wl-tk">TRENCO</span><span class="wl-nm">Tropical Resorts</span></div>
+    </div>
+    <div class="side-foot"><b>Last update:</b> today 10:42<br>Prices delayed up to 5 min.<br>Analysis by <b>claude-opus-4-6</b>.</div>
+  </aside>
+
+  <!-- ===================== MAIN ===================== -->
+  <main class="main">
+
+    <!-- ================= MARKET ================= -->
+    <section class="page" id="page-market">
+      <div class="topbar">
+        <div><h1>Panama equity market</h1><p>Live snapshot of every Latinex-listed common stock, with the current order book (bids &amp; offers) so you can see how volume is building on each name.</p></div>
+        <div class="data-pill"><span class="dot"></span> Data 23 Jun 2026 · delay ≤ 5 min</div>
+      </div>
+      <div class="kpis k5">
+        <div class="kpi good"><div class="lab">BVPSI index</div><div class="val">612.4</div><div class="sub"><span class="delta up">▲ 8.3% 12m</span></div></div>
+        <div class="kpi"><div class="lab">Listed issuers</div><div class="val">34</div><div class="sub"><small>common shares</small></div></div>
+        <div class="kpi good"><div class="lab">Best YTD · BLX</div><div class="val">$38.10</div><div class="sub"><span class="delta up">▲ 22.4%</span></div></div>
+        <div class="kpi bad"><div class="lab">Worst YTD · TRENCO</div><div class="val">$12.05</div><div class="sub"><span class="delta down">▼ 9.1%</span></div></div>
+        <div class="kpi"><div class="lab">Turnover today</div><div class="val">$4.7M</div><div class="sub"><small>18 names traded</small></div></div>
+      </div>
+
+      <div class="grid-2">
+        <div class="card">
+          <div class="card-h"><h3>Universe · common stocks</h3><span class="hint">Click a row to load its order book →</span></div>
+          <table id="uniTable">
+            <thead><tr><th>Issuer</th><th>Price</th><th>YTD</th><th>52-wk range</th><th>Bid</th><th>Ask</th><th>Volume</th></tr></thead>
+            <tbody id="uniBody"></tbody>
+          </table>
+        </div>
+
+        <div class="card depth">
+          <div class="depth-h">
+            <div class="sel"><span class="tk" id="dpTk">BGFG</span><span class="nm" id="dpNm">Banco General</span></div>
+            <div class="spread">
+              <span>Last <b id="dpLast">$58.00</b></span>
+              <span>Spread <b id="dpSpread">$0.30 · 0.52%</b></span>
+              <span>Imbalance <b id="dpImb" class="pos">+64% bid</b></span>
+            </div>
+          </div>
+          <div class="ladder">
+            <div class="bidc"><div class="side-h2">Bids (demand)</div><div id="bidLevels"></div></div>
+            <div class="askc"><div class="side-h2">Offers (supply)</div><div id="askLevels"></div></div>
+          </div>
+          <div class="callout" style="border-top:1px solid var(--line-2)">
+            <div class="ic">↕</div>
+            <div id="depthNote">Bid depth outweighs offers by <b>64%</b> in the top 5 levels — buyers are leaning in. The $0.30 spread (0.52%) is tight for a Latinex name, signalling healthy two-way interest.</div>
+          </div>
+        </div>
+      </div>
+      <p class="foot-note">Order book from Latinex <code>/ofertas/mercado</code> (best bid/ask + depth levels). Bid/ask sizes are share quantities at each price level; the shaded fill is proportional to size.</p>
+    </section>
+
+    <!-- ================= COMPARABLES ================= -->
+    <section class="page active" id="page-comparables">
+      <div class="topbar">
+        <div><h1>Comparables by sector</h1><p>Watchlist names (figures parsed from Latinex filings) against a group of international peers (Yahoo Finance).</p></div>
+        <div class="data-pill"><span class="dot"></span> Data 23 Jun 2026 · delay ≤ 5 min</div>
+      </div>
+      <div class="tabs sector-tabs"><button class="active">Banking</button><button>Insurance</button><button>Other sectors</button></div>
+      <div class="tabs view-tabs">
+        <button class="active" data-view="A" onclick="setView('A')">A · Refined sheet</button>
+        <button data-view="B" onclick="setView('B')">B · Valuation map</button>
+        <button data-view="C" onclick="setView('C')">C · Relative position</button>
+      </div>
+
+      <!-- VIEW A -->
+      <div id="view-A">
+        <div class="kpis k5">
+          <div class="kpi"><div class="lab">P/E · group median</div><div class="val">8.8x</div><div class="sub"><span class="delta up">▲ 41%</span><small>BGFG trades at a premium</small></div></div>
+          <div class="kpi"><div class="lab">P/B · group median</div><div class="val">1.55x</div><div class="sub"><span class="delta up">▲ 32%</span><small>vs 2.05x for BGFG</small></div></div>
+          <div class="kpi good"><div class="lab">ROE · group median</div><div class="val">16.5%</div><div class="sub"><span class="delta up">▲ 0.3pp</span><small>BGFG 16.8%</small></div></div>
+          <div class="kpi bad"><div class="lab">Div. yield · median</div><div class="val">5.4%</div><div class="sub"><span class="delta down">▼ 1.3pp</span><small>BGFG 4.1%</small></div></div>
+          <div class="kpi bad"><div class="lab">Net margin · median</div><div class="val">35.5%</div><div class="sub"><span class="delta down">▼ 7.5pp</span><small>BGFG 28.0%</small></div></div>
+        </div>
+        <div class="card">
+          <div class="card-h"><h3>Banking · watchlist vs. international peers</h3><span class="hint">Highlighted row = local Latinex issuer</span></div>
+          <table>
+            <thead><tr><th>Issuer</th><th>Market cap</th><th>P/E</th><th>P/B</th><th>ROE</th><th>Div. yield</th><th>Net margin</th></tr></thead>
+            <tbody>
+              <tr class="local"><td><div class="co"><span class="tk">BGFG</span><span class="flag">🇵🇦</span><span class="nm">Banco General</span><span class="badge-local">LOCAL</span></div></td><td>$5,500M</td><td>12.4x</td><td>2.05x</td><td class="cell-good">16.8%</td><td>4.1%</td><td>28.0%</td></tr>
+              <tr><td><div class="co"><span class="tk">BLX</span><span class="flag">🇵🇦</span><span class="nm">Bladex</span></div></td><td>$1,850M</td><td>8.2x</td><td>1.12x</td><td>13.5%</td><td class="cell-good">5.2%</td><td>41.0%</td></tr>
+              <tr><td><div class="co"><span class="tk">CIB</span><span class="flag">🇨🇴</span><span class="nm">Bancolombia</span></div></td><td>$9,100M</td><td class="cell-good">5.8x</td><td>1.18x</td><td class="cell-good">17.2%</td><td class="cell-good">7.1%</td><td>36.0%</td></tr>
+              <tr><td><div class="co"><span class="tk">ITUB</span><span class="flag">🇧🇷</span><span class="nm">Itaú Unibanco</span></div></td><td>$62,000M</td><td>9.0x</td><td>1.95x</td><td class="cell-good">19.4%</td><td>5.6%</td><td>38.0%</td></tr>
+              <tr><td><div class="co"><span class="tk">BBVA</span><span class="flag">🇪🇸</span><span class="nm">Banco Bilbao Vizcaya</span></div></td><td>$61,000M</td><td>6.9x</td><td>1.05x</td><td>15.1%</td><td>6.9%</td><td>33.0%</td></tr>
+              <tr><td><div class="co"><span class="tk">JPM</span><span class="flag">🇺🇸</span><span class="nm">JPMorgan Chase</span></div></td><td>$615,000M</td><td>13.1x</td><td>2.15x</td><td>16.5%</td><td>2.2%</td><td>35.0%</td></tr>
+              <tr class="median"><td><div class="co"><span class="tk" style="background:#E2E8F0;color:#475569">≈</span><span class="nm">Group median</span></div></td><td>—</td><td>8.8x</td><td>1.55x</td><td>16.5%</td><td>5.4%</td><td>35.5%</td></tr>
+            </tbody>
+          </table>
+          <div class="callout"><div class="ic">i</div><div><b>Banco General</b> trades at 12.4x earnings and 2.05x book — a premium to the group median (8.8x / 1.55x). Its 16.8% ROE is in line with peers, suggesting the market pays for franchise quality and consistency rather than superior growth. The lower net margin (28% vs 35.5%) reflects its universal-bank mix versus the more specialized peers.</div></div>
+        </div>
+      </div>
+
+      <!-- VIEW B -->
+      <div id="view-B" class="hidden">
+        <div class="map-wrap">
+          <div class="card map-card">
+            <div class="map-head"><h3>Valuation map · Banking</h3><div class="legend"><span><i style="background:#0B3D66"></i>Local issuer</span><span><i style="background:#CBD5E1"></i>International peers</span></div></div>
+            <svg viewBox="0 0 560 400" width="100%">
+              <rect x="60" y="30" width="240" height="160" fill="#DCFCE7" opacity=".35"/><rect x="300" y="30" width="240" height="160" fill="#FEF9C3" opacity=".4"/><rect x="60" y="190" width="240" height="160" fill="#FEF3C7" opacity=".35"/><rect x="300" y="190" width="240" height="160" fill="#FEE2E2" opacity=".35"/>
+              <line class="grid-line" x1="60" y1="30" x2="60" y2="350"/><line class="grid-line" x1="60" y1="350" x2="540" y2="350"/><line class="grid-line" x1="300" y1="30" x2="300" y2="350" stroke-dasharray="4 4"/><line class="grid-line" x1="60" y1="190" x2="540" y2="190" stroke-dasharray="4 4"/>
+              <text class="quad-txt" x="72" y="48">Cheap · profitable</text><text class="quad-txt" x="430" y="48" text-anchor="end">Expensive · profitable</text><text class="quad-txt" x="72" y="340">Cheap · low return</text><text class="quad-txt" x="528" y="340" text-anchor="end">Expensive · low return</text>
+              <text class="axis-title" x="300" y="386" text-anchor="middle">ROE  →  (return on equity)</text>
+              <text class="axis-title" x="20" y="190" text-anchor="middle" transform="rotate(-90 20 190)">↑  P/E  (more expensive)</text>
+              <text class="axis-txt" x="54" y="34" text-anchor="end">15x</text><text class="axis-txt" x="54" y="113" text-anchor="end">12x</text><text class="axis-txt" x="54" y="193" text-anchor="end">9x</text><text class="axis-txt" x="54" y="273" text-anchor="end">6x</text><text class="axis-txt" x="54" y="352" text-anchor="end">4x</text>
+              <text class="axis-txt" x="60" y="365" text-anchor="middle">12%</text><text class="axis-txt" x="220" y="365" text-anchor="middle">15%</text><text class="axis-txt" x="380" y="365" text-anchor="middle">18%</text><text class="axis-txt" x="540" y="365" text-anchor="middle">21%</text>
+              <circle cx="140" cy="251" r="13" fill="#CBD5E1" stroke="#fff" stroke-width="2"/><text class="bubble-lab" x="140" y="280" text-anchor="middle">BLX</text>
+              <circle cx="337" cy="298" r="18" fill="#CBD5E1" stroke="#fff" stroke-width="2"/><text class="bubble-lab" x="337" y="332" text-anchor="middle">CIB</text>
+              <circle cx="455" cy="194" r="26" fill="#CBD5E1" stroke="#fff" stroke-width="2"/><text class="bubble-lab" x="455" y="170" text-anchor="middle">ITUB</text>
+              <circle cx="225" cy="266" r="25" fill="#CBD5E1" stroke="#fff" stroke-width="2"/><text class="bubble-lab" x="225" y="304" text-anchor="middle">BBVA</text>
+              <circle cx="300" cy="84" r="34" fill="#CBD5E1" stroke="#fff" stroke-width="2"/><text class="bubble-lab" x="300" y="50" text-anchor="middle">JPM</text>
+              <circle cx="316" cy="103" r="20" fill="#0B3D66" stroke="#fff" stroke-width="3"/><text class="bubble-lab" x="316" y="103" dy="4" text-anchor="middle" fill="#fff">BG</text><text class="bubble-lab" x="316" y="138" text-anchor="middle" fill="#0B3D66" font-weight="800">Banco General</text>
+            </svg>
+            <div style="font-size:11px;color:var(--muted-2);margin-top:4px">Bubble size ∝ market capitalization.</div>
+          </div>
+          <div class="card detail">
+            <div class="d-head"><span class="tk">BGFG</span><div><div class="nm">Banco General</div><div class="cap">🇵🇦 Panama · $5,500M market cap</div></div></div>
+            <div class="d-twin"><div class="box"><div class="l">P/E</div><div class="v">12.4x</div><div class="d"><span class="delta up">▲ 41% vs median</span></div></div><div class="box"><div class="l">ROE</div><div class="v">16.8%</div><div class="d"><span class="delta up">▲ 0.3pp</span></div></div></div>
+            <div class="d-note">In the <b>"expensive · profitable"</b> quadrant: the market assigns a valuation premium backed by solid, stable returns — comparable to JPMorgan within the group.</div>
+            <div class="ratio-list"><div class="rh">Ratios — vs. group maximum</div>
+              <div class="rrow"><span class="rl">P/B</span><div class="bar"><span style="width:95%"></span></div><span class="rv">2.05x</span></div>
+              <div class="rrow"><span class="rl">ROE</span><div class="bar"><span style="width:87%"></span></div><span class="rv">16.8%</span></div>
+              <div class="rrow"><span class="rl">Div. yield</span><div class="bar"><span style="width:58%"></span></div><span class="rv">4.1%</span></div>
+              <div class="rrow"><span class="rl">Net margin</span><div class="bar"><span style="width:68%"></span></div><span class="rv">28.0%</span></div>
+              <div class="rrow"><span class="rl">Market cap</span><div class="bar"><span style="width:9%"></span></div><span class="rv">$5.5B</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- VIEW C -->
+      <div id="view-C" class="hidden">
+        <div class="sm-grid" id="smGrid"></div>
+        <div class="sm-foot" style="margin-top:16px"><i></i> Red line marks the group median. Blue bar = local issuer.</div>
+      </div>
+
+      <p class="foot-note">Design prototype · illustrative data. Local companies use figures parsed from Latinex filings; international peers come from Yahoo Finance and may differ in methodology. Verify against source PDFs before deciding.</p>
+    </section>
+
+    <!-- ================= DEEP DIVE ================= -->
+    <section class="page" id="page-deepdive">
+      <div class="topbar">
+        <div><h1>Company deep dive</h1><p>A full, McKinsey-style read on the business — what's working, what isn't, and exactly which levers drive the returns.</p></div>
+        <div class="data-pill"><span class="dot"></span> Generated with claude-opus-4-6</div>
+      </div>
+
+      <div class="dd-head">
+        <div class="l"><span class="tk">BGFG</span><div><div class="nm">Banco General, S.A.</div><div class="cap">🇵🇦 Banks · Panama · $5,500M market cap · listed since 1972</div></div></div>
+        <div class="verdict">★ Quality compounder</div>
+      </div>
+      <p class="dd-exec">Banco General is the <b>most profitable, best-capitalized bank on Latinex</b>, compounding a 16.8% ROE while running <b>less leverage than its peers</b> (9.9x vs 10.2x median). The story is consistency, not growth: earnings rose ~17% over FY2023→FY2025 on a wide deposit franchise and best-in-class efficiency (44% cost/income). The catch is <b>valuation</b> — at 12.4x earnings and 2.05x book it is priced for perfection, and the net margin trails specialized peers because of its universal-bank mix.</p>
+
+      <div class="scorecard" id="scorecard"></div>
+
+      <div class="sw-grid">
+        <div class="card sw">
+          <div class="card-h"><h3><span class="dot" style="background:var(--verde)"></span>What's working</h3><span class="hint">strengths</span></div>
+          <ul>
+            <li><span class="ic good-ic">✓</span><div><b>High-quality ROE.</b> 16.8% return on 9.9x leverage — earned through margins and efficiency, not balance-sheet risk.</div></li>
+            <li><span class="ic good-ic">✓</span><div><b>Best-in-class efficiency.</b> 44% cost/income vs 49% peer median — every revenue dollar drops more to the bottom line.</div></li>
+            <li><span class="ic good-ic">✓</span><div><b>Fortress capital.</b> Equity/assets of 10.1% gives a thick buffer and room to keep paying dividends through a cycle.</div></li>
+            <li><span class="ic good-ic">✓</span><div><b>Wide, cheap funding.</b> Dominant retail deposit base supports a 3.4% NIM, above the 3.1% peer median.</div></li>
+            <li><span class="ic good-ic">✓</span><div><b>Reliable capital return.</b> Consistent dividend, 4.1% yield, with a conservative payout that looks sustainable.</div></li>
+          </ul>
+        </div>
+        <div class="card sw">
+          <div class="card-h"><h3><span class="dot" style="background:var(--amber)"></span>What needs watching</h3><span class="hint">risks &amp; gaps</span></div>
+          <ul>
+            <li><span class="ic bad-ic">!</span><div><b>Premium valuation.</b> 12.4x P/E and 2.05x P/B leave little margin of safety if growth or rates disappoint.</div></li>
+            <li><span class="ic bad-ic">!</span><div><b>Thinner net margin.</b> 28% vs 35.5% peer median — the universal-bank cost base dilutes profitability per dollar of revenue.</div></li>
+            <li><span class="ic bad-ic">!</span><div><b>Yield below peers.</b> 4.1% dividend yield trails the 5.4% group median — income investors are paid less to wait.</div></li>
+            <li><span class="ic bad-ic">!</span><div><b>Moderating growth.</b> Earnings growth is decelerating; the franchise is mature in a small domestic market.</div></li>
+            <li><span class="ic bad-ic">!</span><div><b>Local liquidity.</b> Limited float on Latinex makes building or exiting a position slow versus the listed peers.</div></li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="card tree-card">
+        <div class="card-h" style="padding:0 0 8px;border:0"><h3>ROE value-driver tree (DuPont)</h3><span class="hint">vs. group median · green = ahead of peers, red = behind</span></div>
+        <div class="tree-legend"><span><i style="background:var(--verde)"></i>Ahead of peer median</span><span><i style="background:var(--rojo)"></i>Behind peer median</span><span><i style="background:var(--azul)"></i>In line</span></div>
+        <svg id="treeSvg" viewBox="0 0 1000 520" width="100%" style="min-width:900px"></svg>
+      </div>
+
+      <div class="trend-grid">
+        <div class="card trend"><div class="t">Net income (controlling)</div><div class="big">$845M</div>
+          <div class="bars"><div class="b"><div class="col" style="height:78%"></div><div class="yr">FY23</div></div><div class="b"><div class="col" style="height:90%"></div><div class="yr">FY24</div></div><div class="b"><div class="col" style="height:100%"></div><div class="yr">FY25</div></div></div>
+        </div>
+        <div class="card trend"><div class="t">ROE</div><div class="big">16.8%</div>
+          <div class="bars"><div class="b"><div class="col" style="height:88%"></div><div class="yr">FY23</div></div><div class="b"><div class="col" style="height:93%"></div><div class="yr">FY24</div></div><div class="b"><div class="col" style="height:100%"></div><div class="yr">FY25</div></div></div>
+        </div>
+        <div class="card trend"><div class="t">Net interest margin</div><div class="big">3.4%</div>
+          <div class="bars"><div class="b"><div class="col" style="height:86%"></div><div class="yr">FY23</div></div><div class="b"><div class="col" style="height:92%"></div><div class="yr">FY24</div></div><div class="b"><div class="col" style="height:100%"></div><div class="yr">FY25</div></div></div>
+        </div>
+      </div>
+      <p class="foot-note">Design prototype · illustrative figures. In the live app, the narrative, scorecard and tree are generated by claude-opus-4-6 using only figures parsed from Latinex filings (now including OCR for scanned reports) and Yahoo Finance peers.</p>
+    </section>
+
+    <!-- ================= EXPORT ================= -->
+    <section class="page" id="page-export">
+      <div class="topbar"><div><h1>Export to Excel</h1><p>Build a workbook with the market snapshot, watchlist financials, dividends, peers and the deep-dive analyses generated this session.</p></div></div>
+      <div class="card" style="padding:40px;text-align:center">
+        <div style="font-size:40px">📊</div>
+        <h3 style="color:var(--azul);margin:12px 0 6px">Generate latinex_snapshot.xlsx</h3>
+        <p style="color:var(--muted);max-width:440px;margin:0 auto 18px">One click assembles every sheet: Market, per-company income &amp; balance, annual history, ratios, dividends, peers and analyses.</p>
+        <button class="refresh" style="width:auto;display:inline-flex;margin:0 auto"><span class="dot"></span> Generate Excel file</button>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<script>
+  // ---------- page nav ----------
+  document.getElementById('nav').addEventListener('click', function(e){
+    var a = e.target.closest('a'); if(!a) return;
+    var p = a.dataset.page;
+    document.querySelectorAll('#nav a').forEach(function(x){x.classList.toggle('active', x===a);});
+    document.querySelectorAll('.page').forEach(function(s){s.classList.toggle('active', s.id==='page-'+p);});
+    window.scrollTo(0,0);
+  });
+
+  // ---------- Comparables view switch ----------
+  function setView(v){
+    ['A','B','C'].forEach(function(k){document.getElementById('view-'+k).classList.toggle('hidden', k!==v);});
+    document.querySelectorAll('.view-tabs button').forEach(function(b){b.classList.toggle('active', b.dataset.view===v);});
+  }
+
+  // ---------- shared bank data ----------
+  var banks = [
+    {tk:'BGFG', local:true,  cap:5500,  pu:12.4, pb:2.05, roe:16.8, dy:4.1, mg:28.0},
+    {tk:'BLX',  local:false, cap:1850,  pu:8.2,  pb:1.12, roe:13.5, dy:5.2, mg:41.0},
+    {tk:'CIB',  local:false, cap:9100,  pu:5.8,  pb:1.18, roe:17.2, dy:7.1, mg:36.0},
+    {tk:'ITUB', local:false, cap:62000, pu:9.0,  pb:1.95, roe:19.4, dy:5.6, mg:38.0},
+    {tk:'BBVA', local:false, cap:61000, pu:6.9,  pb:1.05, roe:15.1, dy:6.9, mg:33.0},
+    {tk:'JPM',  local:false, cap:615000,pu:13.1, pb:2.15, roe:16.5, dy:2.2, mg:35.0}
+  ];
+  function median(arr){var s=arr.slice().sort(function(a,b){return a-b});var m=Math.floor(s.length/2);return s.length%2?s[m]:(s[m-1]+s[m])/2;}
+
+  // ---------- Comparables C: small multiples ----------
+  (function(){
+    var metrics = [
+      {key:'cap', t:'Market cap',  u:'USD M', fmt:function(v){return v>=1000?'$'+(v/1000).toFixed(v>=10000?0:1)+'B':'$'+v+'M';}, log:true},
+      {key:'pu',  t:'P/E',         u:'x',     fmt:function(v){return v.toFixed(1)+'x';}},
+      {key:'pb',  t:'P/B',         u:'x',     fmt:function(v){return v.toFixed(2)+'x';}},
+      {key:'roe', t:'ROE',         u:'%',     fmt:function(v){return v.toFixed(1)+'%';}},
+      {key:'dy',  t:'Div. yield',  u:'%',     fmt:function(v){return v.toFixed(1)+'%';}},
+      {key:'mg',  t:'Net margin',  u:'%',     fmt:function(v){return v.toFixed(1)+'%';}}
+    ];
+    var grid = document.getElementById('smGrid');
+    metrics.forEach(function(m){
+      var vals = banks.map(function(b){return b[m.key];});
+      var scaleVals = m.log ? vals.map(function(v){return Math.log10(v);}) : vals;
+      var max = Math.max.apply(null, scaleVals);
+      var min = m.log ? Math.min.apply(null, scaleVals) : 0;
+      var med = median(vals);
+      var medScale = m.log ? Math.log10(med) : med;
+      var medPct = ((medScale - min)/(max - min))*100;
+      var rows = banks.map(function(b){
+        var sv = m.log ? Math.log10(b[m.key]) : b[m.key];
+        var w = Math.max(4, Math.min(100, ((sv - min)/(max - min))*100));
+        return '<div class="row'+(b.local?' is-local':'')+'"><span class="rtk">'+b.tk+'</span>'
+          + '<div class="track"><span style="width:'+w.toFixed(1)+'%"></span></div>'
+          + '<span class="rval">'+m.fmt(b[m.key])+'</span></div>';
+      }).join('');
+      var factor = (medPct/100).toFixed(3);
+      var card = document.createElement('div'); card.className='card sm';
+      card.innerHTML = '<div class="sm-h"><span class="t">'+m.t+'</span><span class="u">'+m.u+'</span></div>'
+        + '<div style="position:relative">'+rows
+        + '<div class="median-mark" style="left:calc(63px + (100% - 128px) * '+factor+')"></div></div>';
+      grid.appendChild(card);
+    });
+  })();
+
+  // ---------- Market: universe table + order book ----------
+  (function(){
+    var uni = [
+      {tk:'BGFG', nm:'Banco General', price:58.00, ytd:6.4, lo:50.1, hi:60.2, bid:57.90, ask:58.20, vol:'42,180'},
+      {tk:'BLX',  nm:'Bladex',        price:38.10, ytd:22.4, lo:28.5, hi:39.0, bid:37.95, ask:38.25, vol:'88,400'},
+      {tk:'ASSA', nm:'Grupo ASSA',    price:96.00, ytd:3.1, lo:88.0, hi:101.0, bid:95.50, ask:96.40, vol:'5,120'},
+      {tk:'EGIN', nm:'Empresa General Inv.', price:81.00, ytd:1.8, lo:74.0, hi:84.5, bid:80.70, ask:81.30, vol:'9,640'},
+      {tk:'MHCH', nm:'Grupo Melo',    price:65.00, ytd:-2.4, lo:61.0, hi:71.0, bid:64.20, ask:65.50, vol:'1,870'},
+      {tk:'GBP',  nm:'Grupo Bandelta',price:42.50, ytd:4.0, lo:38.0, hi:44.0, bid:42.10, ask:42.80, vol:'3,300'},
+      {tk:'TRENCO',nm:'Tropical Resorts',price:12.05, ytd:-9.1, lo:11.8, hi:14.2, bid:11.90, ask:12.30, vol:'640'}
+    ];
+    // illustrative depth ladders keyed by ticker
+    var books = {
+      BGFG:{bids:[[57.90,3200],[57.80,2100],[57.70,1500],[57.50,900],[57.30,600]], asks:[[58.20,1100],[58.30,900],[58.40,700],[58.60,500],[58.80,300]]},
+      BLX:{bids:[[37.95,5400],[37.90,3800],[37.80,2600],[37.60,1500],[37.40,900]], asks:[[38.25,2200],[38.35,1800],[38.50,1200],[38.70,800],[38.90,500]]},
+      MHCH:{bids:[[64.20,400],[64.00,300],[63.80,200],[63.50,150],[63.20,100]], asks:[[65.50,600],[65.80,500],[66.10,420],[66.50,300],[67.00,260]]},
+      TRENCO:{bids:[[11.90,220],[11.80,160],[11.70,120],[11.50,90],[11.30,60]], asks:[[12.30,520],[12.50,460],[12.70,400],[13.00,320],[13.40,260]]}
+    };
+    function defBook(u){
+      var b=[],a=[],pb=u.bid,pa=u.ask;
+      for(var i=0;i<5;i++){b.push([+(pb-i*0.1).toFixed(2), Math.round(2000/(i+1))]); a.push([+(pa+i*0.1).toFixed(2), Math.round(1600/(i+1))]);}
+      return {bids:b,asks:a};
+    }
+    var body = document.getElementById('uniBody');
+    uni.forEach(function(u,i){
+      var pos = ((u.price-u.lo)/(u.hi-u.lo))*100;
+      var tr = document.createElement('tr');
+      tr.style.cursor='pointer';
+      tr.innerHTML = '<td><div class="co"><span class="tk">'+u.tk+'</span><span class="nm">'+u.nm+'</span></div></td>'
+        + '<td>$'+u.price.toFixed(2)+'</td>'
+        + '<td class="'+(u.ytd>=0?'pos':'neg')+'">'+(u.ytd>=0?'+':'')+u.ytd.toFixed(1)+'%</td>'
+        + '<td><span class="range"><i style="left:calc('+pos.toFixed(0)+'% - 2px)"></i></span></td>'
+        + '<td class="pos">$'+u.bid.toFixed(2)+'</td>'
+        + '<td class="neg">$'+u.ask.toFixed(2)+'</td>'
+        + '<td>'+u.vol+'</td>';
+      tr.addEventListener('click', function(){ loadBook(u); document.querySelectorAll('#uniBody tr').forEach(function(x){x.classList.remove('local');}); tr.classList.add('local'); });
+      body.appendChild(tr);
+      if(i===0) tr.classList.add('local');
+    });
+    function loadBook(u){
+      var bk = books[u.tk] || defBook(u);
+      var maxQ = Math.max.apply(null, bk.bids.concat(bk.asks).map(function(l){return l[1];}));
+      var bidSum = bk.bids.reduce(function(s,l){return s+l[1];},0);
+      var askSum = bk.asks.reduce(function(s,l){return s+l[1];},0);
+      document.getElementById('dpTk').textContent = u.tk;
+      document.getElementById('dpNm').textContent = u.nm;
+      document.getElementById('dpLast').textContent = '$'+u.price.toFixed(2);
+      var spr = u.ask-u.bid;
+      document.getElementById('dpSpread').textContent = '$'+spr.toFixed(2)+' · '+(spr/u.price*100).toFixed(2)+'%';
+      var imb = Math.round((bidSum-askSum)/(bidSum+askSum)*100);
+      var imbEl = document.getElementById('dpImb');
+      imbEl.textContent = (imb>=0?'+':'')+Math.abs(imb)+'% '+(imb>=0?'bid':'ask');
+      imbEl.className = imb>=0?'pos':'neg';
+      document.getElementById('bidLevels').innerHTML = bk.bids.map(function(l){
+        return '<div class="lvl"><span class="fill" style="width:'+(l[1]/maxQ*100).toFixed(0)+'%"></span><span class="px">$'+l[0].toFixed(2)+'</span><span class="qty">'+l[1].toLocaleString()+'</span></div>';
+      }).join('');
+      document.getElementById('askLevels').innerHTML = bk.asks.map(function(l){
+        return '<div class="lvl"><span class="fill" style="width:'+(l[1]/maxQ*100).toFixed(0)+'%"></span><span class="qty">'+l[1].toLocaleString()+'</span><span class="px">$'+l[0].toFixed(2)+'</span></div>';
+      }).join('');
+      document.getElementById('depthNote').innerHTML = imb>=0
+        ? 'Bid depth outweighs offers by <b>'+Math.abs(imb)+'%</b> across the top 5 levels — buyers are leaning in. A $'+spr.toFixed(2)+' spread ('+(spr/u.price*100).toFixed(2)+'%) signals two-way interest.'
+        : 'Offers outweigh bids by <b>'+Math.abs(imb)+'%</b> across the top 5 levels — sellers are pressing. A $'+spr.toFixed(2)+' spread ('+(spr/u.price*100).toFixed(2)+'%) suggests thinner demand.';
+    }
+    loadBook(uni[0]);
+  })();
+
+  // ---------- Deep Dive: scorecard ----------
+  (function(){
+    var scores = [
+      {l:'Profitability', g:'A−', n:82}, {l:'Growth', g:'B', n:68},
+      {l:'Balance sheet', g:'A', n:88}, {l:'Capital return', g:'B', n:71},
+      {l:'Valuation', g:'C+', n:55}
+    ];
+    function color(n){return n>=80?'var(--verde)':n>=65?'var(--azul)':n>=50?'var(--amber)':'var(--rojo)';}
+    document.getElementById('scorecard').innerHTML = scores.map(function(s){
+      return '<div class="score"><div class="l">'+s.l+'</div><div class="row2"><span class="grade" style="color:'+color(s.n)+'">'+s.g+'</span><span class="num">'+s.n+'/100</span></div>'
+        +'<div class="meter"><span style="width:'+s.n+'%;background:'+color(s.n)+'"></span></div></div>';
+    }).join('');
+  })();
+
+  // ---------- Deep Dive: ROE DuPont tree ----------
+  (function(){
+    var svg = document.getElementById('treeSvg');
+    var NS='http://www.w3.org/2000/svg';
+    // tone: 'good' | 'bad' | 'neutral'
+    var nodes = {
+      roe:   {x:630, y:36,  w:170, h:62, title:'ROE', val:'16.8%', delta:'▲ 0.3pp', tone:'good', big:true},
+      roa:   {x:300, y:170, w:160, h:58, title:'ROA', val:'1.7%', delta:'▲ 0.1pp', tone:'neutral'},
+      lev:   {x:840, y:170, w:160, h:58, title:'Leverage (assets/equity)', val:'9.9x', delta:'▼ 0.3x', tone:'good'},
+      nm:    {x:560, y:300, w:160, h:58, title:'Net profit margin', val:'28.0%', delta:'▼ 7.5pp', tone:'bad'},
+      ay:    {x:170, y:300, w:160, h:58, title:'Asset yield (rev/assets)', val:'6.1%', delta:'▲ 0.4pp', tone:'neutral'},
+      nim:   {x:90,  y:438, w:150, h:62, title:'Net interest margin', val:'3.4%', delta:'▲ 0.3pp', tone:'good'},
+      fee:   {x:255, y:438, w:150, h:62, title:'Fee income / assets', val:'1.1%', delta:'▼ 0.2pp', tone:'neutral'},
+      ci:    {x:470, y:438, w:150, h:62, title:'Cost / income', val:'44%', delta:'▼ 5pp (better)', tone:'good'},
+      cor:   {x:645, y:438, w:150, h:62, title:'Cost of risk', val:'0.8%', delta:'▼ 0.1pp', tone:'neutral'},
+      tax:   {x:820, y:438, w:150, h:62, title:'Effective tax', val:'12%', delta:'low', tone:'good'}
+    };
+    var edges = [['roe','roa'],['roe','lev'],['roa','nm'],['roa','ay'],['nm','ci'],['nm','cor'],['nm','tax'],['ay','nim'],['ay','fee']];
+    var toneStroke={good:'#15803D',bad:'#B91C1C',neutral:'#0B3D66'};
+    var toneBg={good:'#F0FBF3',bad:'#FEF4F4',neutral:'#F4F8FC'};
+    var toneVal={good:'#15803D',bad:'#B91C1C',neutral:'#0B3D66'};
+
+    function el(tag,attrs){var e=document.createElementNS(NS,tag);for(var k in attrs)e.setAttribute(k,attrs[k]);return e;}
+
+    // edges first (orthogonal elbow from parent bottom -> child top)
+    edges.forEach(function(pair){
+      var p=nodes[pair[0]], c=nodes[pair[1]];
+      var x1=p.x, y1=p.y+p.h, x2=c.x, y2=c.y, my=(y1+y2)/2;
+      var d='M '+x1+' '+y1+' L '+x1+' '+my+' L '+x2+' '+my+' L '+x2+' '+y2;
+      svg.appendChild(el('path',{d:d,fill:'none',stroke:'#CBD5E1','stroke-width':'1.6'}));
+    });
+    // operator symbols
+    function op(sym,x,y){var t=el('text',{x:x,y:y,'text-anchor':'middle','font-size':'20','font-weight':'800',fill:'#94A3B8','font-family':'var(--font)'});t.textContent=sym;svg.appendChild(t);}
+    op('×',(nodes.roa.x+nodes.lev.x)/2,nodes.roa.y+34);
+    op('×',(nodes.ay.x+nodes.nm.x)/2,nodes.ay.y+34);
+
+    // nodes
+    Object.keys(nodes).forEach(function(id){
+      var n=nodes[id], x=n.x-n.w/2, y=n.y;
+      svg.appendChild(el('rect',{x:x,y:y,width:n.w,height:n.h,rx:11,fill:toneBg[n.tone],stroke:toneStroke[n.tone],'stroke-width':n.big?'2.4':'1.6'}));
+      var title=el('text',{x:n.x,y:y+18,'text-anchor':'middle','font-size':'10.5','font-weight':'700',fill:'#64748B','font-family':'var(--font)'});title.textContent=n.title;svg.appendChild(title);
+      var val=el('text',{x:n.x,y:y+(n.big?44:40),'text-anchor':'middle','font-size':n.big?'24':'20','font-weight':'800',fill:toneVal[n.tone],'font-family':'var(--font)'});val.textContent=n.val;svg.appendChild(val);
+      if(!n.big){
+        var d=el('text',{x:n.x,y:y+n.h-7,'text-anchor':'middle','font-size':'9.5','font-weight':'700',fill:n.tone==='good'?'#15803D':n.tone==='bad'?'#B91C1C':'#94A3B8','font-family':'var(--font)'});d.textContent=n.delta;svg.appendChild(d);
+      } else {
+        var d2=el('text',{x:n.x,y:y+n.h-9,'text-anchor':'middle','font-size':'10','font-weight':'700',fill:'#15803D','font-family':'var(--font)'});d2.textContent='vs peer median '+n.delta;svg.appendChild(d2);
+      }
+    });
+    // equals hint under ROE
+    var eq=el('text',{x:nodes.roe.x,y:nodes.roe.y+nodes.roe.h+22,'text-anchor':'middle','font-size':'11','fill':'#94A3B8','font-family':'var(--font)'});
+    eq.textContent='ROE  =  ROA  ×  Leverage      ·      ROA  =  Net margin  ×  Asset yield';
+    svg.appendChild(eq);
+  })();
+</script>
+</body>
+</html>

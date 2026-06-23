@@ -265,31 +265,64 @@ def get_notices(issuer_filter=None):
     return pd.DataFrame(rows)
 
 
+def _ob_levels(rec):
+    """All bid/ask price levels for one /ofertas/mercado record.
+
+    The top-level fields are the best level (order_depth 0); `detail` carries
+    the deeper levels (order_depth 1, 2, ...), each possibly one-sided.
+    Returns (bids, asks) as lists of (price, qty), bids high->low, asks low->high.
+    """
+    bids, asks = [], []
+    for lvl in [rec] + (rec.get("detail") or []):
+        b, bq = _to_float(lvl.get("compra")), _to_float(lvl.get("cantidadCompra"))
+        if b:
+            bids.append((b, bq or 0.0))
+        a, aq = _to_float(lvl.get("venta")), _to_float(lvl.get("cantidadVenta"))
+        if a:
+            asks.append((a, aq or 0.0))
+    bids.sort(key=lambda x: -x[0])
+    asks.sort(key=lambda x: x[0])
+    return bids, asks
+
+
 def get_order_book():
     """Current market offers (best bid/ask per instrument).
-    Returns DataFrame: ticker, bid, bid_qty, bid_amount, ask, ask_qty, ask_amount."""
+    Returns DataFrame: ticker, bid, bid_qty, ask, ask_qty, bid_amount, ask_amount."""
     raw = _get_json("/ofertas/mercado")
     rows = []
     for rec in raw.get("data", []):
-        nemo = rec.get("nemotecnico", "")
-        ask = ask_qty = ask_amount = None
-        # Best ask sits in the nested detail array (order_depth levels)
-        for det in rec.get("detail", []):
-            if det.get("venta") is not None:
-                ask = _to_float(det.get("venta"))
-                ask_qty = _to_float(det.get("cantidadVenta"))
-                ask_amount = _to_float(det.get("montoVenta"))
-                break
+        bids, asks = _ob_levels(rec)
+        best_bid = bids[0] if bids else (None, None)
+        best_ask = asks[0] if asks else (None, None)
         rows.append({
-            "ticker": nemo,
-            "bid": _to_float(rec.get("compra")),
-            "bid_qty": _to_float(rec.get("cantidadCompra")),
+            "ticker": rec.get("nemotecnico", ""),
+            "bid": best_bid[0], "bid_qty": best_bid[1],
+            "ask": best_ask[0], "ask_qty": best_ask[1],
             "bid_amount": _to_float(rec.get("montoCompra")),
-            "ask": ask,
-            "ask_qty": ask_qty,
-            "ask_amount": ask_amount,
+            "ask_amount": _to_float(rec.get("montoVenta")),
         })
     return pd.DataFrame(rows)
+
+
+def get_order_book_depth(nemo, levels=6):
+    """Bid/ask ladder (depth of book) for a single instrument.
+
+    Returns dict: bids, asks (each list of (price, qty)); bid_total, ask_total
+    (summed quantities across the returned levels); imbalance_pct (positive =
+    more demand than supply). Empty lists when the instrument has no open orders.
+    """
+    raw = _get_json("/ofertas/mercado")
+    for rec in raw.get("data", []):
+        if rec.get("nemotecnico") == nemo:
+            bids, asks = _ob_levels(rec)
+            bids, asks = bids[:levels], asks[:levels]
+            bt = sum(q for _, q in bids)
+            at = sum(q for _, q in asks)
+            imb = round((bt - at) / (bt + at) * 100) if (bt + at) else None
+            return {"bids": bids, "asks": asks, "bid_total": bt,
+                    "ask_total": at, "imbalance_pct": imb}
+    return {"bids": [], "asks": [], "bid_total": 0, "ask_total": 0,
+            "imbalance_pct": None}
 
 
 def get_index_history(period="1Y"):

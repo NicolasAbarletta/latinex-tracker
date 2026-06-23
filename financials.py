@@ -302,10 +302,10 @@ def _parse_report(pdf_bytes, prefer_annual=False):
     """Parse one filing. Returns the same shape as get_financials()."""
     result = {"income": pd.DataFrame(), "balance": pd.DataFrame(),
               "periods": [], "scale_label": "", "scale_factor": None,
-              "is_quarterly": False, "error": None}
+              "is_quarterly": False, "ocr_used": False, "error": None}
 
+    # 1) Try the native text layer first (fast, exact).
     with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
-        income_pages, balance_pages = [], []
         scan_limit = min(45, len(pdf.pages))
         texts = {}
         total_chars = 0
@@ -313,87 +313,102 @@ def _parse_report(pdf_bytes, prefer_annual=False):
             text = pdf.pages[i].extract_text() or ""
             total_chars += len(text)
             texts[i] = text
-            kind = _classify_page(text)
-            if kind == "income":
-                income_pages.append(i)
-            elif kind == "balance":
-                balance_pages.append(i)
 
+    # 2) Scanned image PDFs (TRENCO, Melo/MHCH, CMBG, CMRealty, ...) have no
+    #    text layer. Fall back to OCR so every issuer can be parsed.
+    if total_chars < 500:
+        try:
+            import ocr
+            texts = ocr.ocr_pdf_pages(pdf_bytes, max_pages=scan_limit)
+            result["ocr_used"] = True
+            total_chars = sum(len(t) for t in texts.values())
+        except Exception as e:
+            result["error"] = ("PDF has no text layer (scanned images) and the "
+                               f"OCR fallback is unavailable: {e}")
+            return result
         if total_chars < 500:
-            result["error"] = ("PDF has no text layer (scanned images) - "
-                               "cannot be parsed automatically")
+            result["error"] = ("PDF has no text layer and OCR recovered no text "
+                               "(blank or non-textual scan).")
             return result
 
-        # When annual figures are required, ONLY annual statement pages
-        # qualify -- silently falling back to a quarterly summary would
-        # mislabel 3-month figures as full-year (accuracy over coverage).
-        def _ordered(pages):
-            if prefer_annual:
-                return [i for i in pages if _is_annual_statement(texts[i])]
-            return sorted(pages, key=lambda i: (
-                _is_annual_statement(texts[i]), i))
+    # 3) Classify pages from whichever text source we ended up with.
+    income_pages, balance_pages = [], []
+    for i in range(scan_limit):
+        kind = _classify_page(texts.get(i, ""))
+        if kind == "income":
+            income_pages.append(i)
+        elif kind == "balance":
+            balance_pages.append(i)
 
-        income_text = ""
-        for pg in _ordered(income_pages):
-            rows = _parse_statement_lines(texts[pg])
-            if len(rows) < 5:
-                continue
-            df, periods = _build_dataframe(rows, texts[pg])
-            if len(df) >= 5:
-                result["income"] = df
-                result["periods"] = periods
-                income_text = texts[pg]
+    # When annual figures are required, ONLY annual statement pages qualify --
+    # silently falling back to a quarterly summary would mislabel 3-month
+    # figures as full-year (accuracy over coverage).
+    def _ordered(pages):
+        if prefer_annual:
+            return [i for i in pages if _is_annual_statement(texts[i])]
+        return sorted(pages, key=lambda i: (_is_annual_statement(texts[i]), i))
+
+    income_text = ""
+    for pg in _ordered(income_pages):
+        rows = _parse_statement_lines(texts[pg])
+        if len(rows) < 5:
+            continue
+        df, periods = _build_dataframe(rows, texts[pg])
+        if len(df) >= 5:
+            result["income"] = df
+            result["periods"] = periods
+            income_text = texts[pg]
+            break
+
+    balance_text = ""
+    for start in _ordered(balance_pages):
+        combined_rows, combined_text = [], texts[start]
+        pg = start
+        while pg < scan_limit:
+            text = texts.get(pg, "")
+            if pg != start:
+                kind = _classify_page(text)
+                is_continuation = (
+                    kind == "balance"
+                    or ("total de pasivos" in _norm(text)
+                        and "notas a los" not in _norm(text)[:200])
+                )
+                if not is_continuation:
+                    break
+            combined_rows.extend(_parse_statement_lines(text))
+            if "total de pasivos y patrimonio" in _norm(text) \
+                    or "total pasivos y patrimonio" in _norm(text):
+                break
+            pg += 1
+            if pg - start >= 3:
+                break
+        if len(combined_rows) < 5:
+            continue
+        df, b_periods = _build_dataframe(combined_rows, combined_text)
+        if len(df) >= 5:
+            result["balance"] = df
+            balance_text = combined_text
+            if not result["periods"]:
+                result["periods"] = b_periods
+            break
+
+    # Scale comes from the pages we actually selected (a filing can mix
+    # thousands and full-unit statements).
+    for text in (income_text, balance_text):
+        if text:
+            label, factor = _extract_scale(text)
+            if label:
+                result["scale_label"] = label
+                result["scale_factor"] = factor
                 break
 
-        balance_text = ""
-        for start in _ordered(balance_pages):
-            combined_rows, combined_text = [], texts[start]
-            pg = start
-            while pg < scan_limit:
-                text = texts.get(pg, "")
-                if pg != start:
-                    kind = _classify_page(text)
-                    is_continuation = (
-                        kind == "balance"
-                        or ("total de pasivos" in _norm(text)
-                            and "notas a los" not in _norm(text)[:200])
-                    )
-                    if not is_continuation:
-                        break
-                combined_rows.extend(_parse_statement_lines(text))
-                if "total de pasivos y patrimonio" in _norm(text) \
-                        or "total pasivos y patrimonio" in _norm(text):
-                    break
-                pg += 1
-                if pg - start >= 3:
-                    break
-            if len(combined_rows) < 5:
-                continue
-            df, b_periods = _build_dataframe(combined_rows, combined_text)
-            if len(df) >= 5:
-                result["balance"] = df
-                balance_text = combined_text
-                if not result["periods"]:
-                    result["periods"] = b_periods
-                break
-
-        # Scale comes from the pages we actually selected (a filing can mix
-        # thousands and full-unit statements).
-        for text in (income_text, balance_text):
-            if text:
-                label, factor = _extract_scale(text)
-                if label:
-                    result["scale_label"] = label
-                    result["scale_factor"] = factor
-                    break
-
-        basis_text = _norm(income_text[:400]) if income_text else ""
-        result["is_quarterly"] = bool(
-            "trimestre" in basis_text or "tres meses" in basis_text
-            or "tres primeros meses" in basis_text
-            or (result["periods"]
-                and QUARTER_DATE_RE.match(str(result["periods"][0])))
-        )
+    basis_text = _norm(income_text[:400]) if income_text else ""
+    result["is_quarterly"] = bool(
+        "trimestre" in basis_text or "tres meses" in basis_text
+        or "tres primeros meses" in basis_text
+        or (result["periods"]
+            and QUARTER_DATE_RE.match(str(result["periods"][0])))
+    )
 
     if result["income"].empty and result["balance"].empty:
         result["error"] = "Could not locate financial statements in the PDF"
@@ -416,8 +431,8 @@ def _get_pdf_cached(report_name, pdf_url):
 def _empty_result(error=None):
     return {"income": pd.DataFrame(), "balance": pd.DataFrame(),
             "periods": [], "scale_label": "", "scale_factor": None,
-            "is_quarterly": False, "pdf_url": "", "report_name": "",
-            "report_date": "", "error": error}
+            "is_quarterly": False, "ocr_used": False, "pdf_url": "",
+            "report_name": "", "report_date": "", "error": error}
 
 
 def get_financials(nemo, issuer_code=None):
@@ -606,6 +621,84 @@ def compute_ratios(fin, price, shares_outstanding):
     return out
 
 
+def dupont_decomposition(fin, kind=None):
+    """Decompose ROE into its value levers for the deep-dive 'ROE tree'.
+
+        ROE = ROA x Leverage
+        ROA = Net margin x Asset yield
+    and, for banks, the levers under those ratios (NIM, fee income, cost/income,
+    cost of risk, effective tax). Every field is None when not computable, so
+    the UI can grey out missing branches. All figures are annualized full-USD.
+
+    Returns dict with *_pct / *_x fields plus the raw inputs and a note.
+    """
+    out = {"roe_pct": None, "roa_pct": None, "leverage_x": None,
+           "net_margin_pct": None, "asset_yield_pct": None,
+           "nim_pct": None, "fee_to_assets_pct": None, "cost_income_pct": None,
+           "cost_of_risk_pct": None, "effective_tax_pct": None,
+           "revenue": None, "net_income": None, "total_assets": None,
+           "total_equity": None, "note": ""}
+
+    m = extract_metrics(fin)
+    if not m:
+        out["note"] = "Statements not parsed; ROE tree unavailable"
+        return out
+
+    ann = 4 if fin.get("is_quarterly") else 1
+    ni = m.get("net_income")
+    eq = m.get("total_equity")
+    ta = m.get("total_assets")
+    if ni is not None:
+        ni = ni * ann
+
+    # Revenue proxy: banks earn net interest income + fees; fall back to
+    # insurance/interest income for other sectors.
+    nii = m.get("net_interest_income")
+    fees = m.get("fees")
+    if kind == "banking" or (nii is not None):
+        revenue = ((nii or 0) + (fees or 0)) * ann or None
+    else:
+        rev_base = m.get("insurance_revenue") or m.get("interest_income")
+        revenue = rev_base * ann if rev_base is not None else None
+    out["revenue"] = revenue
+    out["net_income"] = ni
+    out["total_assets"] = ta
+    out["total_equity"] = eq
+
+    if ni is not None and eq:
+        out["roe_pct"] = round(ni / eq * 100, 2)
+    if ni is not None and ta:
+        out["roa_pct"] = round(ni / ta * 100, 2)
+    if ta and eq:
+        out["leverage_x"] = round(ta / eq, 2)
+    if ni is not None and revenue:
+        out["net_margin_pct"] = round(ni / revenue * 100, 2)
+    if revenue and ta:
+        out["asset_yield_pct"] = round(revenue / ta * 100, 2)
+
+    # Bank-specific levers
+    if ta:
+        if nii is not None:
+            out["nim_pct"] = round(nii * ann / ta * 100, 2)
+        if fees is not None:
+            out["fee_to_assets_pct"] = round(fees * ann / ta * 100, 2)
+    core_rev = ((nii or 0) + (fees or 0)) or None
+    opex = m.get("opex")
+    if opex is not None and core_rev:
+        out["cost_income_pct"] = round(abs(opex) / core_rev * 100, 2)
+    loans = m.get("loans")
+    prov = m.get("provision")
+    if prov is not None and loans:
+        out["cost_of_risk_pct"] = round(abs(prov) * ann / loans * 100, 2)
+    pretax = m.get("pretax_income")
+    if pretax and m.get("net_income") is not None and pretax != 0:
+        out["effective_tax_pct"] = round((1 - m["net_income"] / pretax) * 100, 2)
+
+    if m.get("net_income_is_controlling"):
+        out["note"] = "ROE uses net income attributable to controlling interest"
+    return out
+
+
 def sector_kind(sector, industry=""):
     """Map the Latinex sector/industry strings to a ratio family."""
     s = _norm(f"{sector} {industry}")
@@ -640,20 +733,20 @@ def compute_sector_ratios(fin, kind):
 
         nim = pct(nii * ann if nii else None, ta)
         rows.append(("NIM (proxy)", f"{nim}%" if nim is not None else "-",
-                     "Ingreso neto por intereses anualizado / activos totales"))
+                     "Annualized net interest income / total assets"))
         core_rev = (nii or 0) + (fees or 0)
         eff = pct(opex, core_rev if core_rev else None)
-        rows.append(("Eficiencia", f"{eff}%" if eff is not None else "-",
-                     "Gastos generales / (ingreso neto por intereses + comisiones); menor es mejor"))
+        rows.append(("Efficiency", f"{eff}%" if eff is not None else "-",
+                     "Operating expenses / (net interest income + fees); lower is better"))
         ltd = pct(loans, deposits)
-        rows.append(("Prestamos/Depositos", f"{ltd}%" if ltd is not None else "-",
-                     "Cartera de prestamos / depositos totales"))
+        rows.append(("Loans/Deposits", f"{ltd}%" if ltd is not None else "-",
+                     "Loan book / total deposits"))
         cor = pct(prov * ann if prov else None, loans)
-        rows.append(("Costo de riesgo", f"{cor}%" if cor is not None else "-",
-                     "Provision anualizada / cartera de prestamos"))
+        rows.append(("Cost of risk", f"{cor}%" if cor is not None else "-",
+                     "Annualized provisions / loan book"))
         e2a = pct(m.get("total_equity"), ta)
-        rows.append(("Capital/Activos", f"{e2a}%" if e2a is not None else "-",
-                     "Patrimonio (controladora) / activos totales"))
+        rows.append(("Capital/Assets", f"{e2a}%" if e2a is not None else "-",
+                     "Equity (controlling) / total assets"))
 
     elif kind == "insurance":
         rev = m.get("insurance_revenue")
@@ -666,39 +759,39 @@ def compute_sector_ratios(fin, kind):
         provisions = m.get("insurance_provisions")
 
         margin = pct(svc, rev)
-        rows.append(("Margen de servicio de seguro", f"{margin}%" if margin is not None else "-",
-                     "Resultado del servicio de seguro / ingresos por servicios (IFRS 17)"))
+        rows.append(("Insurance service margin", f"{margin}%" if margin is not None else "-",
+                     "Insurance service result / insurance service revenue (IFRS 17)"))
         # Expense and reinsurance lines are negative in the statement.
         combined = None
         if rev and exp is not None and reins is not None:
             combined = round((abs(exp) + abs(reins)) / rev * 100, 2)
-        rows.append(("Ratio combinado (proxy)", f"{combined}%" if combined is not None else "-",
-                     "(Gastos de seguro + costo neto de reaseguro) / ingresos; <100% = suscripcion rentable"))
+        rows.append(("Combined ratio (proxy)", f"{combined}%" if combined is not None else "-",
+                     "(Insurance expense + net reinsurance cost) / revenue; <100% = profitable underwriting"))
         roi = pct(inv_ret * ann if inv_ret else None, inv)
-        rows.append(("Retorno de inversiones", f"{roi}%" if roi is not None else "-",
-                     "Retorno de inversiones anualizado / instrumentos financieros"))
+        rows.append(("Investment return", f"{roi}%" if roi is not None else "-",
+                     "Annualized investment return / financial instruments"))
         lev = None
         if inv and eq:
             lev = round(inv / eq, 2)
-        rows.append(("Inversiones/Patrimonio", f"{lev}x" if lev is not None else "-",
-                     "Apalancamiento de la cartera de inversiones sobre patrimonio"))
+        rows.append(("Investments/Equity", f"{lev}x" if lev is not None else "-",
+                     "Investment portfolio leverage over equity"))
         res = None
         if provisions and eq:
             res = round(provisions / eq, 2)
-        rows.append(("Reservas/Patrimonio", f"{res}x" if res is not None else "-",
-                     "Provisiones de contratos de seguro / patrimonio"))
+        rows.append(("Reserves/Equity", f"{res}x" if res is not None else "-",
+                     "Insurance contract provisions / equity"))
 
     else:  # generic
         ni = m.get("net_income")
         rev = m.get("insurance_revenue") or m.get("interest_income")
         margin = pct(ni, rev)
         if margin is not None:
-            rows.append(("Margen neto", f"{margin}%", "Utilidad neta / ingresos"))
+            rows.append(("Net margin", f"{margin}%", "Net income / revenue"))
         de = None
         if m.get("total_liabilities") and m.get("total_equity"):
             de = round(m["total_liabilities"] / m["total_equity"], 2)
-        rows.append(("Deuda/Patrimonio", f"{de}x" if de is not None else "-",
-                     "Pasivos totales / patrimonio"))
+        rows.append(("Debt/Equity", f"{de}x" if de is not None else "-",
+                     "Total liabilities / equity"))
 
     return rows
 
@@ -709,18 +802,18 @@ def compute_sector_ratios(fin, kind):
 
 HIST_METRICS = [
     # (key, display label, is_income_metric)
-    ("net_income", "Utilidad neta", True),
-    ("net_interest_income", "Ingreso neto por intereses", True),
-    ("insurance_revenue", "Ingresos por seguros", True),
-    ("insurance_service_result", "Resultado servicio de seguro", True),
-    ("fees", "Honorarios y comisiones", True),
-    ("opex", "Gastos generales", True),
-    ("loans", "Prestamos", False),
-    ("deposits", "Depositos", False),
-    ("investments", "Instrumentos financieros", False),
-    ("total_assets", "Activos totales", False),
-    ("total_equity", "Patrimonio (controladora)", False),
-    ("total_liabilities", "Pasivos totales", False),
+    ("net_income", "Net income", True),
+    ("net_interest_income", "Net interest income", True),
+    ("insurance_revenue", "Insurance revenue", True),
+    ("insurance_service_result", "Insurance service result", True),
+    ("fees", "Fees & commissions", True),
+    ("opex", "Operating expenses", True),
+    ("loans", "Loans", False),
+    ("deposits", "Deposits", False),
+    ("investments", "Financial instruments", False),
+    ("total_assets", "Total assets", False),
+    ("total_equity", "Equity (controlling)", False),
+    ("total_liabilities", "Total liabilities", False),
 ]
 
 
@@ -797,8 +890,8 @@ def get_historical(nemo, years=(2023, 2024, 2025), issuer_code=None):
     for key, label, _is_inc in HIST_METRICS:
         vals = {col: columns[col].get(key) for col in ordered_cols}
         if any(v is not None for v in vals.values()):
-            rows.append({"Metrica": label, **vals})
-    table = pd.DataFrame(rows, columns=["Metrica"] + ordered_cols)
+            rows.append({"Metric": label, **vals})
+    table = pd.DataFrame(rows, columns=["Metric"] + ordered_cols)
     return {"table": table, "sources": sources, "errors": errors}
 
 
