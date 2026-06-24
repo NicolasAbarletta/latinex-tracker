@@ -10,3 +10,5 @@ __pycache__/
 
 # Legacy v1
 latinex_tracker.py
+*.log
+melo_fix*.log

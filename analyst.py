@@ -42,11 +42,11 @@ def _fmt(v, suffix=""):
     return f"{v}{suffix}"
 
 
-def build_data_brief(nemo):
+def build_data_brief(nemo, fin_override=None):
     """Brief de texto con todos los datos reales disponibles para un ticker.
 
-    Returns (brief: str, context: dict) -- context trae piezas reutilizables
-    (quote, summary, kind) para no re-fetchear en el dashboard.
+    fin_override: a pre-parsed financials dict (e.g. vision-extracted) to use
+    instead of re-parsing the PDF live. Returns (brief, context).
     """
     q = api.get_quote(nemo)
     s = api.get_summary(nemo)
@@ -91,7 +91,8 @@ def build_data_brief(nemo):
         pass
 
     # Parsed financials (may fail for scanned PDFs)
-    fin = fin_mod.get_financials(nemo, issuer_code=q["issuer_code"])
+    fin = fin_override if fin_override is not None else \
+        fin_mod.get_financials(nemo, issuer_code=q["issuer_code"])
     if fin["error"]:
         lines.append(f"\n--- FINANCIAL STATEMENTS: NOT AVAILABLE ({fin['error']}) ---")
         lines.append("NOTE: analyze ONLY with market and dividend data; "
@@ -234,7 +235,7 @@ def _fmt_pct(v):
     return "n/d" if v is None or (isinstance(v, float) and pd.isna(v)) else f"{v}%"
 
 
-def build_dupont_brief(nemo, context=None):
+def build_dupont_brief(nemo, context=None, fin_override=None):
     """Text block describing the ROE value-driver tree for the deep-dive prompt.
 
     Returns (text, dupont_dict). dupont_dict is the raw decomposition so the
@@ -247,7 +248,8 @@ def build_dupont_brief(nemo, context=None):
     else:
         q, s, kind = context["quote"], context["summary"], context["kind"]
 
-    fin = fin_mod.get_financials(nemo, issuer_code=q["issuer_code"])
+    fin = fin_override if fin_override is not None else \
+        fin_mod.get_financials(nemo, issuer_code=q["issuer_code"])
     if fin["error"]:
         return f"\n--- ROE TREE: no disponible ({fin['error']}) ---", {}
     d = fin_mod.dupont_decomposition(fin, kind)
@@ -296,11 +298,12 @@ EXACT figures from the brief; if financial statements are unavailable, base the 
 data and say so in the rationales."""
 
 
-def generate_deep_dive(nemo):
+def generate_deep_dive(nemo, fin_override=None):
     """Structured McKinsey-style deep dive. Returns dict:
     {error, model, data, dupont, narrative}. `data` is the parsed JSON above;
     `dupont` is the raw ROE-tree decomposition; `narrative` is the long-form
-    markdown analysis (reuses generate_analysis)."""
+    markdown analysis (reuses generate_analysis). fin_override lets callers pass
+    pre-parsed (e.g. vision-extracted) financials instead of re-parsing live."""
     import json as _json
 
     out = {"error": None, "model": MODEL, "data": None, "dupont": {}, "narrative": ""}
@@ -310,8 +313,8 @@ def generate_deep_dive(nemo):
         return out
 
     try:
-        brief, context = build_data_brief(nemo)
-        dupont_text, dupont = build_dupont_brief(nemo, context=context)
+        brief, context = build_data_brief(nemo, fin_override=fin_override)
+        dupont_text, dupont = build_dupont_brief(nemo, context=context, fin_override=fin_override)
         out["dupont"] = dupont
         full_brief = brief + "\n" + dupont_text
         name = context.get("quote", {}).get("issuer_name", nemo)

@@ -18,11 +18,18 @@ to its full path if it is not on PATH. Install the Spanish language data
 import io
 import logging
 import os
+from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures import TimeoutError as _FutureTimeout
 
 log = logging.getLogger("ocr")
 
-OCR_DPI = int(os.getenv("LATINEX_OCR_DPI", "300"))
+# 200 DPI + fast LSTM models keep accuracy high enough for these statements
+# while running several times faster than 300 DPI (OCR cost ~ DPI^2).
+OCR_DPI = int(os.getenv("LATINEX_OCR_DPI", "200"))
 OCR_LANG = os.getenv("LATINEX_OCR_LANG", "spa+eng")
+OCR_MAX_PAGES = int(os.getenv("LATINEX_OCR_MAX_PAGES", "32"))
+OCR_CONFIG = os.getenv("LATINEX_OCR_CONFIG", "--oem 1")  # LSTM engine only (faster)
+OCR_TIMEOUT = int(os.getenv("LATINEX_OCR_TIMEOUT", "600"))  # seconds per PDF
 
 # Standard install locations checked when TESSERACT_CMD is not set, so OCR
 # works out of the box on a typical Windows machine.
@@ -96,34 +103,63 @@ def _pick_lang(pytesseract, lang):
     return "+".join(parts) or "eng"
 
 
-def ocr_pdf_pages(pdf_bytes, max_pages=45, dpi=OCR_DPI, lang=OCR_LANG):
-    """Render each page to an image and OCR it.
-
-    Returns {page_index: text}, preserving line breaks so the financials
-    parser (which works line-by-line) can consume the output directly.
-    Raises OCRUnavailable if dependencies or the binary are missing.
-    """
-    _ensure()
+def _ocr_render_worker(pdf_bytes, max_pages, dpi, lang, tess_cmd):
+    """Runs in a CHILD process: render pages and OCR them. Isolated so a fatal
+    MuPDF error / OOM / segfault on a malformed PDF kills only this child, not
+    the build. Returns {page_index: text}."""
+    import io as _io
     import fitz
     import pytesseract
     from PIL import Image
-
+    if tess_cmd:
+        pytesseract.pytesseract.tesseract_cmd = tess_cmd
     lang = _pick_lang(pytesseract, lang)
     zoom = dpi / 72.0
     matrix = fitz.Matrix(zoom, zoom)
-
     texts = {}
-    with fitz.open(stream=pdf_bytes, filetype="pdf") as doc:
-        limit = min(max_pages, doc.page_count)
+    doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+    try:
+        limit = min(max_pages, doc.page_count, OCR_MAX_PAGES)
         for i in range(limit):
             try:
                 pix = doc.load_page(i).get_pixmap(matrix=matrix, alpha=False)
-                img = Image.open(io.BytesIO(pix.tobytes("png")))
-                texts[i] = pytesseract.image_to_string(img, lang=lang) or ""
-            except Exception as e:
-                log.warning("OCR failed on page %d: %s", i, e)
+                img = Image.open(_io.BytesIO(pix.tobytes("png")))
+                texts[i] = pytesseract.image_to_string(img, lang=lang, config=OCR_CONFIG) or ""
+            except Exception:
                 texts[i] = ""
+    finally:
+        doc.close()
     return texts
+
+
+def ocr_pdf_pages(pdf_bytes, max_pages=45, dpi=OCR_DPI, lang=OCR_LANG):
+    """OCR a PDF to {page_index: text}.
+
+    When LATINEX_OCR_SUBPROCESS=1 (set by the offline builder), rendering+OCR
+    runs in an isolated child process with a timeout, so a fatal MuPDF error /
+    OOM / hang on a malformed PDF kills only the child and yields {} instead of
+    taking down the whole build. Otherwise it runs in-process (used by the app,
+    which avoids spawning children that would re-import the Streamlit script).
+    Raises OCRUnavailable only if deps/binary are missing.
+    """
+    _ensure()
+    tess_cmd = _resolve_tesseract_cmd()
+    if os.getenv("LATINEX_OCR_SUBPROCESS") == "1":
+        try:
+            with ProcessPoolExecutor(max_workers=1) as ex:
+                fut = ex.submit(_ocr_render_worker, pdf_bytes, max_pages, dpi, lang, tess_cmd)
+                return fut.result(timeout=OCR_TIMEOUT)
+        except _FutureTimeout:
+            log.warning("OCR timed out after %ss; skipping", OCR_TIMEOUT)
+            return {}
+        except Exception as e:  # BrokenProcessPool on a child crash, etc.
+            log.warning("OCR child process failed (%s); skipping", e)
+            return {}
+    try:
+        return _ocr_render_worker(pdf_bytes, max_pages, dpi, lang, tess_cmd)
+    except Exception as e:
+        log.warning("OCR failed (%s); skipping", e)
+        return {}
 
 
 if __name__ == "__main__":

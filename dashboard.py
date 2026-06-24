@@ -171,32 +171,77 @@ def style_fig(fig, height=380, title=None):
 
 
 # ---------------------------------------------------------------------------
-# Cached fetchers
+# Precomputed snapshot (built offline by build_snapshot.py). When present, the
+# fetchers serve from it instantly; otherwise they fall back to live calls.
+# ---------------------------------------------------------------------------
+
+import snapshot as _snap_mod
+
+SNAP = _snap_mod.load() or {}
+
+
+def snapshot_built_at():
+    return SNAP.get("built_at")
+
+
+def _tk(nemo):
+    return SNAP.get("tickers", {}).get(nemo, {})
+
+
+def _have(val):
+    """True if a snapshot value is actually populated (not None/empty)."""
+    if val is None:
+        return False
+    if isinstance(val, pd.DataFrame):
+        return not val.empty
+    return True
+
+
+def _slice_history(df, rango):
+    if df is None or df.empty or rango == "ALL":
+        return df
+    days = {"1M": 30, "3M": 90, "6M": 180, "1Y": 365, "5Y": 1825}.get(rango)
+    if not days:
+        return df
+    cutoff = pd.Timestamp(datetime.now() - timedelta(days=days))
+    return df[df["date"] >= cutoff].reset_index(drop=True)
+
+
+# ---------------------------------------------------------------------------
+# Cached fetchers (snapshot first, live fallback)
 # ---------------------------------------------------------------------------
 
 @st.cache_data(ttl=300, show_spinner=False)
 def universe(include_preferred):
+    u = SNAP.get("universe", {})
+    key = "preferred" if include_preferred else "common"
+    if _have(u.get(key)):
+        return u[key]
     return api.get_equity_universe(include_preferred=include_preferred)
 
 
 @st.cache_data(ttl=300, show_spinner=False)
 def quote(nemo):
-    return api.get_quote(nemo)
+    return _tk(nemo).get("quote") or api.get_quote(nemo)
 
 
 @st.cache_data(ttl=300, show_spinner=False)
 def summary(nemo):
-    return api.get_summary(nemo)
+    return _tk(nemo).get("summary") or api.get_summary(nemo)
 
 
 @st.cache_data(ttl=300, show_spinner=False)
 def history(nemo, rango):
+    h = _tk(nemo).get("history_all")
+    if _have(h):
+        return _slice_history(h, rango)
     return api.get_history(nemo, rango)
 
 
 @st.cache_data(ttl=300, show_spinner=False)
 def dividends(nemo):
-    return api.get_dividends(nemo)
+    d = _tk(nemo).get("dividends")
+    return d if d is not None else api.get_dividends(nemo)
 
 
 @st.cache_data(ttl=300, show_spinner=False)
@@ -205,28 +250,48 @@ def documents(issuer_code):
 
 
 @st.cache_data(ttl=300, show_spinner=False)
+def documents_for(nemo, issuer_code):
+    d = _tk(nemo).get("documents")
+    if d is not None:
+        return d
+    return api.get_documents(issuer_code) if issuer_code else pd.DataFrame()
+
+
+@st.cache_data(ttl=300, show_spinner=False)
 def notices(issuer_name):
+    return api.get_notices(issuer_filter=issuer_name)
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def notices_for(nemo, issuer_name):
+    n = _tk(nemo).get("notices")
+    if n is not None:
+        return n
     return api.get_notices(issuer_filter=issuer_name)
 
 
 @st.cache_data(ttl=120, show_spinner=False)
 def order_book():
-    return api.get_order_book()
+    ob = SNAP.get("order_book")
+    return ob if _have(ob) else api.get_order_book()
 
 
 @st.cache_data(ttl=120, show_spinner=False)
 def order_book_depth(nemo):
-    return api.get_order_book_depth(nemo)
+    d = _tk(nemo).get("order_book_depth")
+    return d if d is not None else api.get_order_book_depth(nemo)
 
 
 @st.cache_data(ttl=1800, show_spinner=False)
 def financials(nemo):
-    return fin_mod.get_financials(nemo)
+    f = _tk(nemo).get("financials")
+    return f if f is not None else fin_mod.get_financials(nemo)
 
 
 @st.cache_data(ttl=86400, show_spinner=False)
 def historical(nemo):
-    return fin_mod.get_historical(nemo)
+    h = _tk(nemo).get("historical")
+    return h if h is not None else fin_mod.get_historical(nemo)
 
 
 @st.cache_data(ttl=1800, show_spinner=False)
@@ -236,17 +301,27 @@ def dupont(nemo, cache_key, kind):
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def peer_metrics(kind):
-    return peers_mod.get_peer_metrics(kind)
+    p = SNAP.get("peers", {}).get(kind)
+    return p if _have(p) else peers_mod.get_peer_metrics(kind)
 
 
 @st.cache_data(ttl=86400, show_spinner=False)
 def index_history():
-    return api.get_index_history("1Y")
+    ih = SNAP.get("index_history")
+    return ih if _have(ih) else api.get_index_history("1Y")
+
+
+def deep_dive(nemo, cache_key):
+    """Snapshot deep dive if precomputed; else generate live. cache_key invalidates
+    the live cache when a new filing drops."""
+    stored = _tk(nemo).get("deep_dive")
+    if stored and not stored.get("error"):
+        return stored
+    return _deep_dive_live(nemo, cache_key)
 
 
 @st.cache_data(ttl=86400, show_spinner=False)
-def deep_dive(nemo, cache_key):
-    """cache_key = latest filing name -> invalidates when a new report drops."""
+def _deep_dive_live(nemo, cache_key):
     return analyst.generate_deep_dive(nemo)
 
 
@@ -470,6 +545,9 @@ def render_sidebar():
             st.cache_data.clear()
             st.session_state["last_refresh"] = datetime.now().strftime("%Y-%m-%d %H:%M")
             st.rerun()
+    built = snapshot_built_at()
+    if built:
+        st.sidebar.caption(f"📦 Precomputed snapshot · built {built[:16].replace('T', ' ')}")
     st.sidebar.caption(f"Last update: {st.session_state.get('last_refresh', 'this session')} "
                        "· prices delayed up to 5 min")
 
@@ -639,18 +717,29 @@ def page_deepdive():
     # ----- McKinsey deep dive (Claude, structured) -----
     cache_key = fin.get("report_name") or "no-report"
     dd = {"error": None, "data": None, "narrative": ""}
+    stored_dd = _tk(nemo).get("deep_dive")
+    has_snapshot_dd = bool(stored_dd and not stored_dd.get("error"))
     can_generate = is_admin() or nemo in wl
-    if can_generate:
+    if has_snapshot_dd:
+        dd = stored_dd  # precomputed offline -> show to everyone, no API cost
         if is_admin():
             cga, cgb = st.columns([5, 1])
             with cgb:
                 if st.button("Regenerate", width="stretch"):
-                    deep_dive.clear()
+                    _deep_dive_live.clear()
+                    dd = _deep_dive_live(nemo, cache_key)
+    elif can_generate:
+        if is_admin():
+            cga, cgb = st.columns([5, 1])
+            with cgb:
+                if st.button("Regenerate", width="stretch"):
+                    _deep_dive_live.clear()
         with st.spinner(f"Generating deep dive with {analyst.MODEL}..."):
             dd = deep_dive(nemo, cache_key)
     else:
-        st.info(f"The Claude deep dive is available only for watchlist companies "
-                f"({', '.join(wl)}). The ROE tree and financials below are always shown.")
+        st.info("The full Claude deep dive is precomputed for the main companies and "
+                "available on demand for watchlist names. The ROE tree and financials "
+                "below are always shown.")
 
     data = dd.get("data") or {}
     verdict = data.get("verdict", "Deep dive")
@@ -813,18 +902,17 @@ def page_deepdive():
             st.info("No dividend history.")
 
     with st.expander("Filings & material disclosures"):
-        if q["issuer_code"]:
-            try:
-                docs = documents(q["issuer_code"])
-            except LatinexAPIError:
-                docs = pd.DataFrame()
-            if not docs.empty:
-                for _, row in docs.head(10).iterrows():
-                    st.markdown(f"- {row['date']} · *{row['type']}* · "
-                                f"[{row['name'][:70]}]({row['pdf_url']})")
+        try:
+            docs = documents_for(nemo, q["issuer_code"])
+        except LatinexAPIError:
+            docs = pd.DataFrame()
+        if docs is not None and not docs.empty:
+            for _, row in docs.head(10).iterrows():
+                st.markdown(f"- {row['date']} · *{row['type']}* · "
+                            f"[{row['name'][:70]}]({row['pdf_url']})")
         issuer_key = (q["issuer_name"].split(",")[0] if q["issuer_name"] else nemo)
         try:
-            nots = notices(issuer_key)
+            nots = notices_for(nemo, issuer_key)
         except LatinexAPIError:
             nots = pd.DataFrame()
         if not nots.empty:
