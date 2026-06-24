@@ -532,12 +532,19 @@ def extract_metrics(fin, period=None):
 
     # --- shared / income ---
     ni_ctrl = (find_i(["utilidad neta", "controladora"], exclude=["no controladora"])
-               or find_i(["accionistas", "controladora"], exclude=["no controladora"]))
+               or find_i(["accionistas", "controladora"], exclude=["no controladora"])
+               or find_i(["utilidad neta", "propietarios"], exclude=["no controladora", "integrales"]))
     out["net_income"] = ni_ctrl if ni_ctrl is not None else \
         find_i(["utilidad neta"],
                exclude=["antes", "integrales", "operacional", "por accion"])
     out["net_income_is_controlling"] = ni_ctrl is not None
     out["pretax_income"] = find_i(["utilidad", "antes"], exclude=["integrales"])
+    # Generic-company revenue (consumer/industrial) for net margin / asset yield.
+    out["revenue"] = (find_i(["total de ingresos"], exclude=["intereses"])
+                      or find_i(["ingresos de actividades ordinarias"])
+                      or find_i(["ingresos por ventas"])
+                      or find_i(["ventas netas"])
+                      or find_i(["ingresos", "ordinarias"]))
 
     # --- banking lines ---
     out["interest_income"] = find_i(["total de ingresos por intereses"])
@@ -564,12 +571,18 @@ def extract_metrics(fin, period=None):
     out["insurance_provisions"] = find_b(["provisiones sobre contratos de seguros"])
 
     # --- balance ---
-    out["total_assets"] = find_b(["total", "activos"])
+    # Generic (non-bank) balance sheets split into current / non-current, so the
+    # naive "total + activos" search would hit "Total de activos corrientes"
+    # first. Exclude the "corriente" subtotals so we get the grand totals.
+    out["total_assets"] = (find_b(["total", "activos"], exclude=["corriente"])
+                           or find_b(["total", "activos"]))
     out["total_equity"] = (find_b(["patrimonio", "controladora"], exclude=["no controladora"])
                            or find_b(["controladora"], exclude=["no controladora"])
+                           or find_b(["patrimonio", "propietarios"], exclude=["no controladora"])
                            or find_b(["total", "patrimonio"], exclude=["pasivos"]))
     out["total_equity_incl_minority"] = find_b(["total", "patrimonio"], exclude=["pasivos"])
-    out["total_liabilities"] = find_b(["total", "pasivos"], exclude=["patrimonio"])
+    out["total_liabilities"] = (find_b(["total", "pasivos"], exclude=["patrimonio", "corriente"])
+                                or find_b(["total", "pasivos"], exclude=["patrimonio"]))
 
     return out
 
@@ -658,7 +671,8 @@ def dupont_decomposition(fin, kind=None):
     if kind == "banking" or (nii is not None):
         revenue = ((nii or 0) + (fees or 0)) * ann or None
     else:
-        rev_base = m.get("insurance_revenue") or m.get("interest_income")
+        rev_base = (m.get("insurance_revenue") or m.get("interest_income")
+                    or m.get("revenue"))
         revenue = rev_base * ann if rev_base is not None else None
     out["revenue"] = revenue
     out["net_income"] = ni
@@ -783,7 +797,7 @@ def compute_sector_ratios(fin, kind):
 
     else:  # generic
         ni = m.get("net_income")
-        rev = m.get("insurance_revenue") or m.get("interest_income")
+        rev = m.get("insurance_revenue") or m.get("interest_income") or m.get("revenue")
         margin = pct(ni, rev)
         if margin is not None:
             rows.append(("Net margin", f"{margin}%", "Net income / revenue"))
