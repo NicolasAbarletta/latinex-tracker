@@ -224,7 +224,8 @@ def build(deep_dive_top=15, deep_dive_all=False, do_deep_dive=True, only=None, r
             snap.save(data)
             try:
                 _log(f"  [{i}/{len(selected)}] {nemo}: generating deep dive...")
-                dd = analyst.generate_deep_dive(nemo)
+                fin_ov = entry.get("financials")  # reuse parsed/vision data; no re-parse/OCR
+                dd = analyst.generate_deep_dive(nemo, fin_override=fin_ov)
                 entry["deep_dive"] = dd
                 if not dd.get("error"):
                     entry.pop("_dd_failed", None)
