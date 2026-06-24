@@ -311,15 +311,10 @@ def index_history():
     return ih if _have(ih) else api.get_index_history("1Y")
 
 
-def deep_dive(nemo, cache_key):
-    """Snapshot deep dive if precomputed; else generate live. cache_key invalidates
-    the live cache when a new filing drops."""
-    stored = _tk(nemo).get("deep_dive")
-    if stored and not stored.get("error"):
-        return stored
-    return _deep_dive_live(nemo, cache_key)
-
-
+# Deep-dive reports are PRELOADED from the snapshot and shown read-only. The app
+# never generates them on page load. _deep_dive_live exists only for the optional
+# local-admin "Regenerate" button (a single manual API call); reports are normally
+# built offline by build_snapshot.py / fix_company.py.
 @st.cache_data(ttl=86400, show_spinner=False)
 def _deep_dive_live(nemo, cache_key):
     return analyst.generate_deep_dive(nemo)
@@ -714,32 +709,25 @@ def page_deepdive():
     y = api.get_dividend_yield(divs, q["price"])
     r = fin_mod.compute_ratios(fin, q["price"], s["shares_outstanding"]) if not fin["error"] else {}
 
-    # ----- McKinsey deep dive (Claude, structured) -----
+    # ----- McKinsey deep dive (preloaded only -- NEVER calls the API at view
+    # time; reports are precomputed offline by build_snapshot.py / fix_company.py) -----
     cache_key = fin.get("report_name") or "no-report"
-    dd = {"error": None, "data": None, "narrative": ""}
     stored_dd = _tk(nemo).get("deep_dive")
-    has_snapshot_dd = bool(stored_dd and not stored_dd.get("error"))
-    can_generate = is_admin() or nemo in wl
-    if has_snapshot_dd:
-        dd = stored_dd  # precomputed offline -> show to everyone, no API cost
-        if is_admin():
-            cga, cgb = st.columns([5, 1])
-            with cgb:
-                if st.button("Regenerate", width="stretch"):
-                    _deep_dive_live.clear()
-                    dd = _deep_dive_live(nemo, cache_key)
-    elif can_generate:
-        if is_admin():
-            cga, cgb = st.columns([5, 1])
-            with cgb:
-                if st.button("Regenerate", width="stretch"):
-                    _deep_dive_live.clear()
-        with st.spinner(f"Generating deep dive with {analyst.MODEL}..."):
-            dd = deep_dive(nemo, cache_key)
-    else:
-        st.info("The full Claude deep dive is precomputed for the main companies and "
-                "available on demand for watchlist names. The ROE tree and financials "
-                "below are always shown.")
+    has_report = bool(stored_dd and not stored_dd.get("error"))
+    dd = stored_dd if has_report else {"error": None, "data": None, "narrative": ""}
+    if not has_report:
+        st.info("The AI deep-dive report for this company hasn't been precomputed yet. "
+                "Reports are generated offline (not on page load), so this page never "
+                "spends API credits. The financials, ratios and ROE tree below are always shown.")
+    # Optional manual refresh: local admin only (never auto-runs, never in the
+    # deployed/public app); fires a single API call only when clicked.
+    if has_report and is_admin() and not PUBLIC_MODE:
+        _c1, _c2 = st.columns([5, 1])
+        with _c2:
+            if st.button("Regenerate", width="stretch",
+                         help="Admin only: regenerate this report via the API (one call)"):
+                _deep_dive_live.clear()
+                dd = _deep_dive_live(nemo, cache_key)
 
     data = dd.get("data") or {}
     verdict = data.get("verdict", "Deep dive")
