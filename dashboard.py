@@ -551,7 +551,7 @@ def render_sidebar():
     wl_current = load_watchlist()
     if is_admin():
         try:
-            all_tickers = universe(True)["ticker"].tolist()
+            all_tickers = universe(False)["ticker"].tolist()
         except LatinexAPIError:
             all_tickers = wl_current
         wl_selected = st.sidebar.multiselect(
@@ -688,11 +688,13 @@ def page_market():
 def page_deepdive():
     wl = load_watchlist()
     try:
-        all_tickers = universe(True)["ticker"].tolist()
+        # Common equity only (incl. real-estate/REIT common names); excludes the
+        # preferred-share tickers so the picker stays clean.
+        all_tickers = universe(False)["ticker"].tolist()
     except LatinexAPIError as e:
         st.error(f"Could not load tickers: {e}")
         return
-    options = wl + [t for t in sorted(all_tickers) if t not in wl]
+    options = [t for t in wl if t in all_tickers] + [t for t in sorted(all_tickers) if t not in wl]
     nemo = st.selectbox("Company", options, index=options.index("BGFG") if "BGFG" in options else 0)
 
     try:

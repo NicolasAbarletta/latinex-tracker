@@ -85,7 +85,7 @@ def extract_statements(pdf_bytes, pages, report_name="", pdf_url="",
 
     content = [{"type": "text", "text": PROMPT}]
     rendered = 0
-    for pg in pages[:6]:
+    for pg in pages[:8]:
         png = _render_png(pdf_bytes, pg, dpi=dpi)
         if not png:
             continue
