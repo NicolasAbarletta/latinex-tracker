@@ -188,6 +188,18 @@ def _tk(nemo):
     return SNAP.get("tickers", {}).get(nemo, {})
 
 
+def verified_companies():
+    """Tickers whose financials were read by Claude vision and parsed cleanly --
+    the set we trust enough to surface in the Deep Dive picker."""
+    out = []
+    for tk, e in SNAP.get("tickers", {}).items():
+        fin = e.get("financials") or {}
+        m = fin_mod.extract_metrics(fin) if not fin.get("error") else {}
+        if fin.get("vision_used") and not fin.get("error") and m.get("net_income") is not None:
+            out.append(tk)
+    return out
+
+
 def _have(val):
     """True if a snapshot value is actually populated (not None/empty)."""
     if val is None:
@@ -687,14 +699,17 @@ def page_market():
 
 def page_deepdive():
     wl = load_watchlist()
-    try:
-        # Common equity only (incl. real-estate/REIT common names); excludes the
-        # preferred-share tickers so the picker stays clean.
-        all_tickers = universe(False)["ticker"].tolist()
-    except LatinexAPIError as e:
-        st.error(f"Could not load tickers: {e}")
-        return
-    options = [t for t in wl if t in all_tickers] + [t for t in sorted(all_tickers) if t not in wl]
+    # Show only companies with fully verified (vision-read) financials, so every
+    # name in the picker has correct, current data + a 3-year history.
+    verified = set(verified_companies())
+    if verified:
+        options = [t for t in wl if t in verified] + sorted(t for t in verified if t not in wl)
+    else:
+        try:
+            options = universe(False)["ticker"].tolist()
+        except LatinexAPIError as e:
+            st.error(f"Could not load tickers: {e}")
+            return
     nemo = st.selectbox("Company", options, index=options.index("BGFG") if "BGFG" in options else 0)
 
     try:
