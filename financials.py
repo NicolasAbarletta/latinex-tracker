@@ -537,6 +537,14 @@ def extract_metrics(fin, period=None):
     out["net_income"] = ni_ctrl if ni_ctrl is not None else \
         find_i(["utilidad neta"],
                exclude=["antes", "integrales", "operacional", "por accion"])
+    # Non-bank issuers label the bottom line differently (Grupo Melo/CMBG:
+    # "Ganancia neta"; loss-making names like PPHO: "Perdida neta").
+    if out["net_income"] is None:
+        out["net_income"] = (find_i(["ganancia neta"], exclude=["por accion", "antes"])
+                             or find_i(["perdida neta"], exclude=["por accion", "antes"])
+                             or find_i(["resultado neto"], exclude=["por accion"])
+                             or find_i(["resultado del ejercicio"], exclude=["por accion"])
+                             or find_i(["resultado del periodo"], exclude=["por accion"]))
     out["net_income_is_controlling"] = ni_ctrl is not None
     out["pretax_income"] = find_i(["utilidad", "antes"], exclude=["integrales"])
     # Generic-company revenue (consumer/industrial) for net margin / asset yield.
@@ -574,14 +582,14 @@ def extract_metrics(fin, period=None):
     # Generic (non-bank) balance sheets split into current / non-current, so the
     # naive "total + activos" search would hit "Total de activos corrientes"
     # first. Exclude the "corriente" subtotals so we get the grand totals.
-    out["total_assets"] = (find_b(["total", "activos"], exclude=["corriente"])
+    out["total_assets"] = (find_b(["total", "activos"], exclude=["corriente", "circulante"])
                            or find_b(["total", "activos"]))
     out["total_equity"] = (find_b(["patrimonio", "controladora"], exclude=["no controladora"])
                            or find_b(["controladora"], exclude=["no controladora"])
                            or find_b(["patrimonio", "propietarios"], exclude=["no controladora"])
                            or find_b(["total", "patrimonio"], exclude=["pasivos"]))
     out["total_equity_incl_minority"] = find_b(["total", "patrimonio"], exclude=["pasivos"])
-    out["total_liabilities"] = (find_b(["total", "pasivos"], exclude=["patrimonio", "corriente"])
+    out["total_liabilities"] = (find_b(["total", "pasivos"], exclude=["patrimonio", "corriente", "circulante"])
                                 or find_b(["total", "pasivos"], exclude=["patrimonio"]))
 
     return out

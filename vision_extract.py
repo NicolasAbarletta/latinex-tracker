@@ -32,37 +32,50 @@ def _render_png(pdf_bytes, page_index, dpi=170):
         return pix.tobytes("png")
 
 
-PROMPT = """These are page images from a Panamanian company's consolidated financial \
+_PROMPT_HEAD = """These are page images from a Panamanian company's consolidated financial \
 report (in Spanish). Transcribe TWO statements:
 - Estado de Resultados (income statement)
 - Estado de Situacion / Posicion Financiera (balance sheet)
 
-Return ONLY a JSON object (no prose, no code fences) shaped exactly:
-{
-  "scale": "the scale as printed, e.g. 'en balboas', 'en miles de US$', 'en dolares'",
-  "period": "the current-period label, e.g. '31 de marzo de 2026'",
-  "income": [{"label": "<exact Spanish label as printed>", "value": <number>}, ...],
-  "balance": [{"label": "<exact Spanish label as printed>", "value": <number>}, ...]
-}
+{period_instr}
 
-Rules:
-- Use the CURRENT period column only (ignore prior-year comparatives and any 'Nota' column).
-- Values are plain numbers (no commas/currency); negatives as negative numbers.
-- Do NOT apply the scale yourself; report raw printed numbers plus the scale string.
-- Include all real line items and especially totals: total de ingresos, costo de ventas, \
-utilidad bruta, gastos generales, utilidad neta, utilidad neta atribuible a la controladora; \
-total de activos, total de pasivos, total de patrimonio (y patrimonio de la controladora).
+Return ONLY a JSON object (no prose, no code fences) shaped exactly:
+{{
+  "income": [{{"label": "<exact Spanish label as printed>", "value": <number>}}, ...],
+  "balance": [{{"label": "<exact Spanish label as printed>", "value": <number>}}, ...]
+}}
+
+CRITICAL rules:
+- Return EVERY value in FULL CURRENCY UNITS. If a statement is presented "en miles" / \
+"in thousands", multiply each of its numbers by 1,000; if "en millones", by 1,000,000. \
+The income statement and balance sheet MAY USE DIFFERENT SCALES in the same report \
+(e.g. income "en miles", balance in full balboas) -- apply each statement's own scale so \
+both end up in full units.
+- Ignore any "Nota" reference column and all prior-year comparative columns.
+- Plain numbers only (no commas/currency symbols); negatives as negative numbers.
+- Include all line items, especially the totals: total de ingresos / total de ingresos por \
+intereses, utilidad neta, utilidad neta atribuible a la controladora (o a los propietarios); \
+total de activos, total de pasivos, total de patrimonio.
 - If a statement is not visible in these images, return it as an empty list."""
 
-_SCALE_FACTOR = {"miles": 1000, "millones": 1_000_000}
+_PERIOD_QUARTERLY = ("This is an interim report. Use the CURRENT 3-month period column "
+                     "(the most recent quarter shown).")
+_PERIOD_ANNUAL = (
+    "This is a YEAR-END (fourth-quarter) report; you must extract FULL-YEAR (12-month) "
+    "figures for the most recent year.\n"
+    "IMPORTANT: the income statement frequently shows, for the SAME year, TWO columns: a "
+    "3-month quarter column (headed 'IV Trimestre' / 'Por los tres meses terminados el 31 "
+    "de diciembre') AND a 12-month full-year column (headed 'Acumulado' / 'Por el ano "
+    "terminado el 31 de diciembre'). Column order is often: Nota, 2025-quarter, 2024-quarter, "
+    "2025-accumulated, 2024-accumulated. You MUST use the 2025 FULL-YEAR ACCUMULATED column "
+    "(the 12-month one) -- its 'utilidad neta' is roughly 4x a single quarter (for a large "
+    "bank, hundreds of millions, not tens of millions). NEVER use the 3-month quarter column. "
+    "The balance sheet has a single date column -- use the most recent date.")
 
 
-def _scale_factor(scale_label):
-    s = (scale_label or "").lower()
-    for k, f in _SCALE_FACTOR.items():
-        if k in s:
-            return f
-    return 1
+def _build_prompt(is_quarterly):
+    return _PROMPT_HEAD.format(
+        period_instr=_PERIOD_QUARTERLY if is_quarterly else _PERIOD_ANNUAL)
 
 
 def extract_statements(pdf_bytes, pages, report_name="", pdf_url="",
@@ -83,7 +96,7 @@ def extract_statements(pdf_bytes, pages, report_name="", pdf_url="",
         result["error"] = "ANTHROPIC_API_KEY not set for vision extraction"
         return result
 
-    content = [{"type": "text", "text": PROMPT}]
+    content = [{"type": "text", "text": _build_prompt(is_quarterly)}]
     rendered = 0
     for pg in pages[:8]:
         png = _render_png(pdf_bytes, pg, dpi=dpi)
@@ -112,10 +125,11 @@ def extract_statements(pdf_bytes, pages, report_name="", pdf_url="",
         result["error"] = f"vision extraction failed: {e}"
         return result
 
-    scale_label = data.get("scale", "") or ""
-    period = data.get("period") or period_hint or "current"
-    result["scale_label"] = f"{scale_label} (vision)" if scale_label else "vision-extracted"
-    result["scale_factor"] = _scale_factor(scale_label)
+    # Vision already returns full currency units (per-statement scale applied),
+    # so the downstream factor is 1.
+    period = period_hint or "current"
+    result["scale_label"] = "full units (vision)"
+    result["scale_factor"] = 1
     result["periods"] = [period]
 
     def _df(rows):

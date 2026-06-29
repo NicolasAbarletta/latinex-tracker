@@ -34,23 +34,46 @@ def _log(m):
     print(f"[{datetime.now().strftime('%H:%M:%S')}] {m}", flush=True)
 
 
-def _statement_pages(pdf_bytes):
+def _annual_rank(text):
+    """Higher = more likely the AUDITED ANNUAL statement (full year), lower =
+    the quarterly summary. Q4 filings contain both."""
+    n = fm._norm(text[:600])
+    score = 0
+    if "ano terminado" in n or "ano que termino" in n:
+        score += 3
+    if "acumulado" in n:
+        score += 1
+    if "31 de diciembre" in n:
+        score += 1
+    if "trimestres terminados" in n or "tres meses" in n or "para los trimestres" in n:
+        score -= 3
+    return score
+
+
+def _statement_pages(pdf_bytes, annual=False):
     texts = ocr.ocr_pdf_pages(pdf_bytes)
     inc = [i for i in sorted(texts) if fm._classify_page(texts[i]) == "income"]
     bal = [i for i in sorted(texts) if fm._classify_page(texts[i]) == "balance"]
-    # include the page after each statement (balance/income often span 2 pages)
+    if annual and inc:
+        # Q4 reports include BOTH a quarterly summary and the audited annual
+        # statements; pick the annual (year-ended) income page only, so vision
+        # isn't fed the 3-month quarter columns.
+        inc = [max(inc, key=lambda i: _annual_rank(texts[i]))]
+    if annual and bal:
+        bal = [max(bal, key=lambda i: _annual_rank(texts[i]))]
+    # include the page after each statement (statements often span 2 pages)
     pages = sorted(set(p for x in (inc + bal) for p in (x, x + 1)))
     return pages
 
 
 def _vision_fin(doc, is_quarterly, period_hint):
     pdf = fm._get_pdf_cached(doc["name"], doc["pdf_url"])
-    pages = _statement_pages(pdf)
+    pages = _statement_pages(pdf, annual=not is_quarterly)
     if not pages:
         return {"error": "no statement pages found"}
     return vx.extract_statements(pdf, pages, report_name=doc["name"],
                                  pdf_url=doc["pdf_url"], is_quarterly=is_quarterly,
-                                 period_hint=period_hint)
+                                 period_hint=period_hint, dpi=200)
 
 
 def _history_capped(nemo):
