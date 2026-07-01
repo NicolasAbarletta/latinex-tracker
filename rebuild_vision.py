@@ -50,10 +50,18 @@ def _annual_rank(text):
     return score
 
 
+def _is_cashflow_page(text):
+    """Cash-flow statement page (the shared classifier deliberately skips it)."""
+    lines = [l.strip() for l in fm._norm(text).split("\n") if l.strip()][:5]
+    return any(l.startswith("estado") and "flujos de efectivo" in l and len(l) < 80
+               for l in lines)
+
+
 def _statement_pages(pdf_bytes, annual=False):
     texts = ocr.ocr_pdf_pages(pdf_bytes)
     inc = [i for i in sorted(texts) if fm._classify_page(texts[i]) == "income"]
     bal = [i for i in sorted(texts) if fm._classify_page(texts[i]) == "balance"]
+    cfs = [i for i in sorted(texts) if _is_cashflow_page(texts[i])]
     if annual and inc:
         # Q4 reports include BOTH a quarterly summary and the audited annual
         # statements; pick the annual (year-ended) income page only, so vision
@@ -61,8 +69,10 @@ def _statement_pages(pdf_bytes, annual=False):
         inc = [max(inc, key=lambda i: _annual_rank(texts[i]))]
     if annual and bal:
         bal = [max(bal, key=lambda i: _annual_rank(texts[i]))]
+    if annual and cfs:
+        cfs = [max(cfs, key=lambda i: _annual_rank(texts[i]))]
     # include the page after each statement (statements often span 2 pages)
-    pages = sorted(set(p for x in (inc + bal) for p in (x, x + 1)))
+    pages = sorted(set(p for x in (inc + bal + cfs) for p in (x, x + 1)))
     return pages
 
 
@@ -176,6 +186,21 @@ def rebuild(nemo, do_deep_dive=True):
         data["tickers"].setdefault(nemo, {})["deep_dive"] = dd
         snap.save(data)
         _log(f"    deep dive: {'OK -> ' + str((dd.get('data') or {}).get('verdict')) if not dd.get('error') else 'ERR ' + str(dd['error'])}")
+
+        # "What changed this quarter" -- computed deltas narrated in one short call
+        try:
+            import analytics
+            ht = (entry.get("historical") or {}).get("table")
+            deltas = analytics.quarter_deltas(ht, entry["financials"].get("is_quarterly", True))
+            eqm = analytics.earnings_quality(entry["financials"])
+            wc = analyst.generate_whats_changed(nemo, q.get("issuer_name") or nemo, deltas, eqm)
+            data = snap.load() or {}
+            data["tickers"].setdefault(nemo, {})["whats_changed"] = {
+                "text": wc.get("text", ""), "deltas": deltas, "error": wc.get("error")}
+            snap.save(data)
+            _log(f"    what changed: {'OK' if not wc.get('error') else 'ERR ' + str(wc['error'])}")
+        except Exception as e:  # noqa: BLE001
+            _log(f"    what changed failed: {e}")
     _log(f"    {nemo} done.")
 
 

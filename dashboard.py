@@ -31,6 +31,7 @@ import latinex_api as api  # noqa: E402
 import financials as fin_mod  # noqa: E402
 import peers as peers_mod  # noqa: E402
 import analyst  # noqa: E402
+import analytics  # noqa: E402
 from latinex_api import LatinexAPIError  # noqa: E402
 
 WATCHLIST_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "watchlist.json")
@@ -198,6 +199,26 @@ def verified_companies():
         if fin.get("vision_used") and not fin.get("error") and m.get("net_income") is not None:
             out.append(tk)
     return out
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def deep_analytics(nemo):
+    """All snapshot-derived analytics for one company (no API calls)."""
+    e = _tk(nemo)
+    q, s = e.get("quote") or {}, e.get("summary") or {}
+    fin = e.get("financials") or {}
+    h, div = e.get("history_all"), e.get("dividends")
+    ht = (e.get("historical") or {}).get("table")
+    quarterly = fin.get("is_quarterly", True)
+    return {
+        "tr": analytics.total_return(h, div),
+        "vb": analytics.valuation_bands(h, ht, s.get("shares_outstanding"), quarterly),
+        "dp": analytics.dividend_profile(div, q.get("price"), ht,
+                                         s.get("shares_outstanding"), quarterly),
+        "lq": analytics.liquidity_score(h, q, e.get("order_book_depth")),
+        "eq": analytics.earnings_quality(fin),
+        "deltas": analytics.quarter_deltas(ht, quarterly),
+    }
 
 
 def _have(val):
@@ -682,6 +703,56 @@ def page_market():
             except LatinexAPIError as e:
                 st.warning(f"Order book unavailable: {e}")
 
+    # ----- House view (cross-company ranking, precomputed offline) -----
+    hv = SNAP.get("house_view") or {}
+    if hv.get("ranking"):
+        st.subheader("House view · covered companies ranked")
+        if hv.get("overview"):
+            html(f"<p style='font-size:13.5px;color:#475569;line-height:1.6;max-width:1000px'>"
+                 f"{hv['overview']}</p>")
+        stance_color = {"top pick": VERDE, "attractive": VERDE, "hold": AZUL,
+                        "neutral": AZUL, "expensive": AMBER, "avoid": ROJO}
+        cards = []
+        for item in hv["ranking"]:
+            col = stance_color.get(str(item.get("stance", "")).lower(), AZUL)
+            cards.append(
+                f"<div style='background:#fff;border:1px solid #E2E8F0;border-left:4px solid {col};"
+                f"border-radius:12px;padding:12px 16px;margin-bottom:9px;"
+                f"box-shadow:0 1px 3px rgba(11,61,102,.06)'>"
+                f"<b style='color:{AZUL}'>#{item.get('rank')} {item.get('ticker')}</b> "
+                f"<span style='font-size:11px;font-weight:700;color:{col};margin-left:6px'>"
+                f"{str(item.get('stance','')).upper()}</span>"
+                f"<div style='font-size:13px;color:#475569;margin-top:4px'>{item.get('one_liner','')}</div></div>")
+        html("".join(cards))
+        st.caption(f"Generated offline with {SNAP.get('model', 'Claude')} from verified filings; "
+                   "not investment advice.")
+
+    # ----- total-return league table (verified companies) -----
+    league = []
+    for tk in verified_companies():
+        a = deep_analytics(tk)
+        tr_, lq_, dp_ = a["tr"], a["lq"], a["dp"]
+        vb_ = a["vb"]
+        league.append({"Ticker": tk,
+                       "Total return 1y %": tr_["tr_1y_pct"],
+                       "Total return 5y %/yr": tr_["tr_5y_pct"],
+                       "Yield TTM %": dp_["ttm_yield_pct"],
+                       "P/E pctile vs self": (vb_["pe"] or {}).get("percentile"),
+                       "Liquidity": lq_["grade"]})
+    if league:
+        st.subheader("Total return league table (verified coverage)")
+        ldf = pd.DataFrame(league).sort_values("Total return 1y %", ascending=False)
+        st.dataframe(ldf, hide_index=True, width="stretch",
+                     column_config={
+                         "Total return 1y %": st.column_config.NumberColumn(format="%.1f%%"),
+                         "Total return 5y %/yr": st.column_config.NumberColumn(format="%.1f%%"),
+                         "Yield TTM %": st.column_config.NumberColumn(format="%.2f%%"),
+                         "P/E pctile vs self": st.column_config.ProgressColumn(
+                             format="%.0f", min_value=0, max_value=100,
+                             help="Where today's P/E sits in the stock's own 2023-todate range; low = cheap vs. itself"),
+                     })
+        st.caption("Total return = price + dividends reinvested. Source: Latinex prices & dividend history.")
+
     if not nonzero.empty:
         ranked = nonzero.sort_values("ytd_pct", ascending=False)
         fig = go.Figure(go.Bar(
@@ -763,13 +834,16 @@ def page_deepdive():
     </div>""")
 
     # ----- KPI strip -----
-    k1, k2, k3, k4, k5 = st.columns(5)
+    k1, k2, k3, k4, k5, k6 = st.columns(6)
     k1.metric("Price", f"${fmt(q['price'])}",
               f"{q['daily_change_pct']:+.2f}% today" if q["daily_change_pct"] is not None else None)
     k2.metric("YTD", f"{fmt(q['ytd_change_pct'], '{:+.2f}')}%" if q["ytd_change_pct"] is not None else "-")
     k3.metric("Market cap", fmt(q["market_cap"], "${:,.0f}"))
     k4.metric("Div. yield 12m", f"{fmt(y['total_yield_pct'])}%")
     k5.metric("P/E", fmt(r.get("pe")) if r else "-")
+    an = deep_analytics(nemo)
+    lq = an["lq"]
+    k6.metric("Liquidity", lq["grade"] or "-", help=lq["grade_reason"] or None)
 
     if dd.get("error"):
         st.warning(dd["error"])
@@ -781,6 +855,12 @@ def page_deepdive():
     if data.get("strengths") and data.get("weaknesses"):
         st.write("")
         html(sw_html(data["strengths"], data["weaknesses"]))
+
+    # ----- What changed this quarter (precomputed at build time) -----
+    wc = _tk(nemo).get("whats_changed") or {}
+    if wc.get("text"):
+        html(f"<div class='lx-callout' style='margin-top:14px'><div class='ic'>Δ</div>"
+             f"<div><b>What changed this quarter</b><br>{wc['text']}</div></div>")
 
     # ----- ROE / DuPont tree (always, from parsed financials) -----
     st.subheader("ROE value-driver tree (DuPont)")
@@ -818,6 +898,65 @@ def page_deepdive():
         st.plotly_chart(style_fig(fig, 380), width="stretch")
     else:
         st.info("No trades in the selected range.")
+
+    # ----- total return (dividends reinvested) -----
+    tr = an["tr"]
+    if tr["series"] is not None:
+        st.subheader("Total return (dividends reinvested)")
+        c1, c2 = st.columns([1.7, 1])
+        with c1:
+            srs = tr["series"]
+            fig = go.Figure()
+            fig.add_trace(go.Scatter(x=srs["date"], y=srs["tr_idx"], mode="lines",
+                                     name="Total return", line=dict(color=AZUL, width=2.4)))
+            fig.add_trace(go.Scatter(x=srs["date"], y=srs["price_idx"], mode="lines",
+                                     name="Price only", line=dict(color=GRIS, width=1.6, dash="dot")))
+            fig.update_layout(yaxis_title="Indexed to 100")
+            st.plotly_chart(style_fig(fig, 330), width="stretch", key=f"tr_{nemo}")
+        with c2:
+            m1, m2 = st.columns(2)
+            m1.metric("Total return 1y", f"{fmt(tr['tr_1y_pct'], '{:+.1f}')}%" if tr["tr_1y_pct"] is not None else "-")
+            m2.metric("Price only 1y", f"{fmt(tr['pr_1y_pct'], '{:+.1f}')}%" if tr["pr_1y_pct"] is not None else "-")
+            m3, m4 = st.columns(2)
+            m3.metric("Total return 5y (ann.)", f"{fmt(tr['tr_5y_pct'], '{:+.1f}')}%" if tr["tr_5y_pct"] is not None else "-")
+            m4.metric("Price only 5y (ann.)", f"{fmt(tr['pr_5y_pct'], '{:+.1f}')}%" if tr["pr_5y_pct"] is not None else "-")
+            if tr["value_10k"]:
+                start_yr = tr["start"].year if tr["start"] is not None else ""
+                html(f"<div class='lx-callout'><div class='ic'>$</div><div>"
+                     f"$10,000 invested in {start_yr} with dividends reinvested is worth "
+                     f"<b>${tr['value_10k']:,}</b> today"
+                     + (f" — plus <b>${tr['div_cash_10k']:,}</b> of dividend cash if taken as income."
+                        if tr["div_cash_10k"] else ".") + "</div></div>")
+
+    # ----- valuation vs. its own history -----
+    vb = an["vb"]
+    if vb["pe"] or vb["pb"]:
+        st.subheader("Valuation vs. its own history")
+        vc1, vc2 = st.columns([1.7, 1])
+        band = vb["pe"] or vb["pb"]
+        band_name = "P/E" if vb["pe"] else "P/B"
+        with vc1:
+            s = band["series"]
+            fig = go.Figure()
+            fig.add_trace(go.Scatter(x=s["date"], y=s["mult"], mode="lines",
+                                     name=band_name, line=dict(color=AZUL, width=2)))
+            fig.add_hline(y=band["median"], line=dict(color=GRIS, dash="dash"),
+                          annotation_text=f"median {band['median']}x")
+            fig.update_layout(yaxis_title=f"{band_name} (x)")
+            st.plotly_chart(style_fig(fig, 330), width="stretch", key=f"band_{nemo}")
+        with vc2:
+            for key, label in [("pe", "P/E"), ("pb", "P/B")]:
+                b = vb.get(key)
+                if not b:
+                    continue
+                tone = ("expensive" if b["percentile"] >= 80 else
+                        "cheap" if b["percentile"] <= 20 else "mid-range")
+                st.metric(f"{label} today", f"{b['current']}x",
+                          f"{b['percentile']}th pct of own history",
+                          delta_color="inverse" if b["percentile"] >= 80 else
+                          ("normal" if b["percentile"] <= 20 else "off"))
+                st.caption(f"{label} range since 2023: {b['min']}x – {b['max']}x "
+                           f"(median {b['median']}x) → **{tone}** vs. itself")
 
     # ----- valuation & ratios (preserved) -----
     if not fin["error"]:
@@ -873,6 +1012,48 @@ def page_deepdive():
             st.warning(f"Financial statements not parsed: {fin['error']}")
         if fin.get("pdf_url"):
             st.markdown(f"[Open source PDF: {fin['report_name']}]({fin['pdf_url']})")
+
+    # ----- dividend record & sustainability -----
+    dp = an["dp"]
+    if dp["per_year"]:
+        st.subheader("Dividend record & sustainability")
+        dcols = st.columns(5)
+        dcols[0].metric("Dividends / share (TTM)", f"${fmt(dp['ttm_dps'])}" if dp["ttm_dps"] is not None else "-")
+        dcols[1].metric("Yield (TTM)", f"{fmt(dp['ttm_yield_pct'])}%" if dp["ttm_yield_pct"] is not None else "-")
+        dcols[2].metric("Payout vs FY2025 EPS", f"{fmt(dp['payout_pct'], '{:,.0f}')}%" if dp["payout_pct"] is not None else "-",
+                        help="Trailing dividends per share / FY2025 earnings per share")
+        dcols[3].metric("Growth streak", f"{dp['growth_streak_years']} yrs" if dp["growth_streak_years"] is not None else "-",
+                        help="Consecutive complete years of rising dividends per share")
+        dcols[4].metric("DPS CAGR 3y", f"{fmt(dp['dps_cagr_3y_pct'], '{:+.1f}')}%" if dp["dps_cagr_3y_pct"] is not None else "-")
+        years = [y for y in dp["per_year"] if y >= datetime.now().year - 6]
+        if years:
+            fig = go.Figure(go.Bar(x=[str(y) for y in years],
+                                   y=[dp["per_year"][y] for y in years],
+                                   marker_color=AZUL,
+                                   text=[f"${dp['per_year'][y]:,.2f}" for y in years],
+                                   textposition="outside"))
+            st.plotly_chart(style_fig(fig, 260, "Dividends per share by year"),
+                            width="stretch", key=f"dps_{nemo}")
+
+    # ----- earnings quality (cash-flow statement, when extracted) -----
+    eq = an["eq"]
+    if eq["cfo"] is not None:
+        st.subheader("Earnings quality (cash flow)")
+        qc = st.columns(5)
+        qc[0].metric("Operating cash flow", fmt(eq["cfo"], "${:,.0f}"))
+        qc[1].metric("Cash conversion", f"{fmt(eq['cash_conversion_pct'], '{:,.0f}')}%" if eq["cash_conversion_pct"] is not None else "-",
+                     help="Operating cash flow / net income — near or above 100% means earnings are backed by cash")
+        qc[2].metric("Free cash flow", fmt(eq["fcf"], "${:,.0f}") if eq["fcf"] is not None else "-",
+                     help="Operating cash flow − capital expenditures")
+        qc[3].metric("Dividends paid", fmt(abs(eq["dividends_paid"]), "${:,.0f}") if eq["dividends_paid"] else "-")
+        qc[4].metric("Dividend coverage", f"{fmt(eq['div_coverage_x'])}x" if eq["div_coverage_x"] is not None else "-",
+                     help="Operating cash flow / dividends paid — above 1x means dividends are cash-funded")
+        cc = eq["cash_conversion_pct"]
+        if cc is not None:
+            tone = ("Earnings are fully cash-backed." if cc >= 90 else
+                    "Earnings are partially cash-backed — watch accruals." if cc >= 50 else
+                    "Weak cash conversion — reported earnings are well ahead of cash generation.")
+            st.caption(f"Cash conversion {cc:,.0f}%: {tone} (Period figures from the latest filing.)")
 
     # ----- long-form narrative (preserved) -----
     if dd.get("narrative"):

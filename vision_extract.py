@@ -33,17 +33,24 @@ def _render_png(pdf_bytes, page_index, dpi=170):
 
 
 _PROMPT_HEAD = """These are page images from a Panamanian company's consolidated financial \
-report (in Spanish). Transcribe TWO statements:
+report (in Spanish). Transcribe THREE statements (any that are visible):
 - Estado de Resultados (income statement)
 - Estado de Situacion / Posicion Financiera (balance sheet)
+- Estado de Flujos de Efectivo (cash-flow statement)
 
 {period_instr}
 
 Return ONLY a JSON object (no prose, no code fences) shaped exactly:
 {{
   "income": [{{"label": "<exact Spanish label as printed>", "value": <number>}}, ...],
-  "balance": [{{"label": "<exact Spanish label as printed>", "value": <number>}}, ...]
+  "balance": [{{"label": "<exact Spanish label as printed>", "value": <number>}}, ...],
+  "cashflow": [{{"label": "<exact Spanish label as printed>", "value": <number>}}, ...]
 }}
+
+For the cash-flow statement, make sure to include the section NET totals (efectivo neto de/\
+usado en actividades de operacion / inversion / financiamiento), plus capital-expenditure \
+lines (adquisicion de inmuebles, mobiliario y equipo / propiedades) and "dividendos pagados" \
+if shown.
 
 CRITICAL rules:
 - Return EVERY value in FULL CURRENCY UNITS. If a statement is presented "en miles" / \
@@ -86,7 +93,8 @@ def extract_statements(pdf_bytes, pages, report_name="", pdf_url="",
     DataFrames, scale, periods, error, vision_used=True)."""
     import anthropic
 
-    result = {"income": pd.DataFrame(), "balance": pd.DataFrame(), "periods": [],
+    result = {"income": pd.DataFrame(), "balance": pd.DataFrame(),
+              "cashflow": pd.DataFrame(), "periods": [],
               "scale_label": "", "scale_factor": None, "is_quarterly": is_quarterly,
               "ocr_used": False, "vision_used": True, "pdf_url": pdf_url,
               "report_name": report_name, "report_date": "", "error": None}
@@ -143,6 +151,7 @@ def extract_statements(pdf_bytes, pages, report_name="", pdf_url="",
 
     result["income"] = _df(data.get("income"))
     result["balance"] = _df(data.get("balance"))
+    result["cashflow"] = _df(data.get("cashflow"))
     if result["income"].empty and result["balance"].empty:
         result["error"] = "vision returned no usable line items"
     return result

@@ -354,6 +354,104 @@ def generate_deep_dive(nemo, fin_override=None):
     return out
 
 
+# ---------------------------------------------------------------------------
+# "What changed this quarter" -- short delta narrative from computed numbers
+# ---------------------------------------------------------------------------
+
+WHATS_CHANGED_PROMPT = """You are an equity analyst covering Latinex (Panama). Below are the \
+COMPUTED changes for {name} ({nemo}): the latest quarter's run-rate (annualized flows) and \
+balance-sheet levels versus fiscal year 2025, plus cash-flow quality metrics when available.
+
+{table}
+
+Write 2-4 sentences in English, plain prose (no headers/bullets), telling an investor what \
+actually changed and whether it is good or bad. Use ONLY these numbers; quote the most \
+important 2-3 figures (percent changes). Be direct -- 'run-rate earnings are tracking X% \
+above/below last year' style. Do not invent causes you cannot see in the numbers."""
+
+
+def generate_whats_changed(nemo, name, deltas, eq=None):
+    """One short Claude call narrating the computed quarter deltas.
+    Returns {text, error}."""
+    out = {"text": "", "error": None}
+    if not ANTHROPIC_API_KEY:
+        out["error"] = "ANTHROPIC_API_KEY not set"
+        return out
+    if not deltas:
+        out["error"] = "no computed deltas"
+        return out
+    lines = [f"{m}: latest {v['latest']:,.0f} vs FY2025 {v['fy2025']:,.0f} "
+             f"({v['delta_pct']:+.1f}%)" for m, v in deltas.items()]
+    if eq and eq.get("cash_conversion_pct") is not None:
+        lines.append(f"Cash conversion (CFO/net income): {eq['cash_conversion_pct']}%")
+    if eq and eq.get("div_coverage_x") is not None:
+        lines.append(f"Dividend coverage (CFO/dividends): {eq['div_coverage_x']}x")
+    try:
+        client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+        msg = client.messages.create(
+            model=MODEL, max_tokens=600,
+            messages=[{"role": "user", "content": WHATS_CHANGED_PROMPT.format(
+                name=name, nemo=nemo, table="\n".join(lines))}])
+        out["text"] = next((b.text for b in msg.content if b.type == "text"), "").strip()
+    except Exception as e:  # noqa: BLE001
+        out["error"] = f"what-changed generation failed: {e}"
+    return out
+
+
+# ---------------------------------------------------------------------------
+# House view -- rank all covered companies against each other
+# ---------------------------------------------------------------------------
+
+HOUSE_VIEW_PROMPT = """You are the head of research for a Panama-focused equity shop. Below \
+are the verified, filing-derived metrics for every company you cover on Latinex.
+
+{table}
+
+Rank ALL of them from most to least attractive on a risk-adjusted basis, weighing valuation \
+(absolute and vs. the stock's own history), profitability and its trend, dividend yield and \
+sustainability, balance-sheet strength, and liquidity (illiquid names deserve a discount).
+
+Return ONLY a JSON object (no prose, no code fences):
+{{
+  "overview": "3-4 sentences: the current state of the Latinex market and where the value is",
+  "ranking": [
+    {{"rank": 1, "ticker": "XXX", "stance": "Top pick | Attractive | Hold | Expensive | Avoid",
+      "one_liner": "one crisp sentence with the 1-2 numbers that decide it"}}
+  ]
+}}
+
+Rules: every company exactly once; stances must be internally consistent with the ranking; \
+use ONLY figures from the table; write in English."""
+
+
+def generate_house_view(companies_table):
+    """One Claude call ranking the covered companies. companies_table is a
+    preformatted text block of per-company metrics. Returns {overview, ranking,
+    error}."""
+    import json as _json
+    out = {"overview": "", "ranking": [], "error": None}
+    if not ANTHROPIC_API_KEY:
+        out["error"] = "ANTHROPIC_API_KEY not set"
+        return out
+    try:
+        client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+        msg = client.messages.create(
+            model=MODEL, max_tokens=2500,
+            messages=[{"role": "user",
+                       "content": HOUSE_VIEW_PROMPT.format(table=companies_table)}])
+        text = next((b.text for b in msg.content if b.type == "text"), "").strip()
+        if text.startswith("```"):
+            text = text.strip("`")
+            text = text[text.find("{"):]
+        start, end = text.find("{"), text.rfind("}")
+        data = _json.loads(text[start:end + 1])
+        out["overview"] = data.get("overview", "")
+        out["ranking"] = data.get("ranking", [])
+    except Exception as e:  # noqa: BLE001
+        out["error"] = f"house view generation failed: {e}"
+    return out
+
+
 if __name__ == "__main__":
     import sys
     nemo = sys.argv[1] if len(sys.argv) > 1 else "BGFG"
