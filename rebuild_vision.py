@@ -76,14 +76,15 @@ def _statement_pages(pdf_bytes, annual=False):
     return pages
 
 
-def _vision_fin(doc, is_quarterly, period_hint):
+def _vision_fin(doc, is_quarterly, period_hint, prior_year=False):
     pdf = fm._get_pdf_cached(doc["name"], doc["pdf_url"])
     pages = _statement_pages(pdf, annual=not is_quarterly)
     if not pages:
         return {"error": "no statement pages found"}
     return vx.extract_statements(pdf, pages, report_name=doc["name"],
                                  pdf_url=doc["pdf_url"], is_quarterly=is_quarterly,
-                                 period_hint=period_hint, dpi=200)
+                                 period_hint=period_hint, dpi=200,
+                                 prior_year=prior_year)
 
 
 def _history_capped(nemo):
@@ -100,19 +101,27 @@ def build_history(docs, latest_fin, years=(2023, 2024, 2025)):
     columns, sources, errors = {}, [], []
     for y in years:
         match = docs[docs["name"].str.contains(f"{y}_Q4", case=False, na=False)]
+        prior = False
         if match.empty:
-            errors.append(f"FY{y}: no Q4 report")
-            continue
+            # Recently listed issuers have no FY{y} filing, but the NEXT year's
+            # annual report carries FY{y} as the comparative column.
+            match = docs[docs["name"].str.contains(f"{y + 1}_Q4", case=False, na=False)]
+            prior = True
+            if match.empty:
+                errors.append(f"FY{y}: no Q4 report (listed later?)")
+                continue
         doc = match.iloc[0]
-        fin = _vision_fin(doc, is_quarterly=False, period_hint=str(y))
+        fin = _vision_fin(doc, is_quarterly=False, period_hint=str(y), prior_year=prior)
         if fin.get("error"):
             errors.append(f"FY{y}: {fin['error']}")
             continue
         m = fm.extract_metrics(fin)
         if m:
             columns[f"FY{y}"] = m
-            sources.append((f"FY{y}", doc["name"], doc["pdf_url"]))
-        _log(f"      FY{y}: NI={m.get('net_income')} rev={m.get('revenue')} "
+            tag = " (comparative)" if prior else ""
+            sources.append((f"FY{y}{tag}", doc["name"], doc["pdf_url"]))
+        _log(f"      FY{y}{' (from comparative)' if prior else ''}: "
+             f"NI={m.get('net_income')} rev={m.get('revenue')} "
              f"assets={m.get('total_assets')} equity={m.get('total_equity')}")
     if latest_fin and not latest_fin.get("error"):
         m = fm.extract_metrics(latest_fin)

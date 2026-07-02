@@ -67,6 +67,14 @@ total de activos, total de pasivos, total de patrimonio.
 
 _PERIOD_QUARTERLY = ("This is an interim report. Use the CURRENT 3-month period column "
                      "(the most recent quarter shown).")
+
+_PERIOD_ANNUAL_PRIOR = (
+    "This is a YEAR-END (fourth-quarter) report showing TWO fiscal years side by side. "
+    "You must extract the PRIOR-YEAR COMPARATIVE column -- the EARLIER of the two years "
+    "shown -- and only its FULL-YEAR (12-month / 'Acumulado' / 'ano terminado') figures, "
+    "never a 3-month quarter column. Example: in a 2025 annual report showing 2025 and "
+    "2024 columns, extract the 2024 column. For the balance sheet use the earlier of the "
+    "two dates shown.")
 _PERIOD_ANNUAL = (
     "This is a YEAR-END (fourth-quarter) report; you must extract FULL-YEAR (12-month) "
     "figures for the most recent year.\n"
@@ -80,13 +88,17 @@ _PERIOD_ANNUAL = (
     "The balance sheet has a single date column -- use the most recent date.")
 
 
-def _build_prompt(is_quarterly):
-    return _PROMPT_HEAD.format(
-        period_instr=_PERIOD_QUARTERLY if is_quarterly else _PERIOD_ANNUAL)
+def _build_prompt(is_quarterly, prior_year=False):
+    if prior_year:
+        instr = _PERIOD_ANNUAL_PRIOR
+    else:
+        instr = _PERIOD_QUARTERLY if is_quarterly else _PERIOD_ANNUAL
+    return _PROMPT_HEAD.format(period_instr=instr)
 
 
 def extract_statements(pdf_bytes, pages, report_name="", pdf_url="",
-                       is_quarterly=True, period_hint="", dpi=170, api_key=None):
+                       is_quarterly=True, period_hint="", dpi=170, api_key=None,
+                       prior_year=False):
     """Render `pages` and have Claude vision transcribe the statements.
 
     Returns a dict shaped like financials.get_financials() (income/balance
@@ -104,7 +116,7 @@ def extract_statements(pdf_bytes, pages, report_name="", pdf_url="",
         result["error"] = "ANTHROPIC_API_KEY not set for vision extraction"
         return result
 
-    content = [{"type": "text", "text": _build_prompt(is_quarterly)}]
+    content = [{"type": "text", "text": _build_prompt(is_quarterly, prior_year)}]
     rendered = 0
     for pg in pages[:8]:
         png = _render_png(pdf_bytes, pg, dpi=dpi)
