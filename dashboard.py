@@ -79,8 +79,9 @@ h3{border-bottom:2px solid var(--soft); padding-bottom:6px;}
   position:relative; overflow:hidden;
 }
 [data-testid="stMetric"]::before{content:""; position:absolute; left:0; top:0; bottom:0; width:3px; background:var(--azul); opacity:.85;}
-[data-testid="stMetricLabel"]{color:var(--muted); font-weight:600;}
-[data-testid="stMetricValue"]{font-weight:800; color:var(--ink);}
+[data-testid="stMetricLabel"]{color:var(--muted); font-weight:600; white-space:normal;}
+[data-testid="stMetricValue"]{font-weight:800; color:var(--ink); font-size:1.6rem; line-height:1.15;}
+[data-testid="stMetricDelta"]{font-size:.82rem;}
 
 /* tabs */
 .stTabs [data-baseweb="tab-list"]{gap:4px; background:#fff; border:1px solid var(--line); border-radius:11px; padding:4px; box-shadow:0 1px 3px rgba(11,61,102,.06);}
@@ -377,6 +378,21 @@ def fmt(val, pattern="{:,.2f}", dash="-"):
     return pattern.format(val)
 
 
+def fmt_money_compact(val, dash="-"):
+    """$21.2B / $844.6M / $451K -- fits metric cards and reads faster."""
+    if val is None or (isinstance(val, float) and pd.isna(val)):
+        return dash
+    sign = "-" if val < 0 else ""
+    a = abs(val)
+    if a >= 1e9:
+        return f"{sign}${a / 1e9:,.2f}B"
+    if a >= 1e6:
+        return f"{sign}${a / 1e6:,.1f}M"
+    if a >= 1e3:
+        return f"{sign}${a / 1e3:,.0f}K"
+    return f"{sign}${a:,.0f}"
+
+
 def money_style(df, money_cols=None, decimals=0):
     cols = money_cols or [c for c in df.columns if df[c].dtype.kind in "fi"]
     return df.style.format({c: ("${:,.%df}" % decimals).format for c in cols}, na_rep="-")
@@ -406,7 +422,7 @@ def peers_display(df, local_tickers):
         return [""] * len(row)
 
     return (show.style.apply(highlight, axis=1)
-            .format({"Market cap": lambda v: fmt(v, "${:,.0f}"),
+            .format({"Market cap": lambda v: fmt_money_compact(v),
                      "P/E": lambda v: fmt(v), "P/B": lambda v: fmt(v),
                      "ROE %": lambda v: fmt(v), "Div yield %": lambda v: fmt(v),
                      "Margin %": lambda v: fmt(v)}, na_rep="-"))
@@ -822,7 +838,7 @@ def page_deepdive():
     vtone = {"good": "v-good", "bad": "v-bad"}.get(data.get("verdict_tone"), "v-neutral")
 
     # ----- header -----
-    mcap_txt = fmt(q["market_cap"], "${:,.0f}")
+    mcap_txt = fmt_money_compact(q["market_cap"])
     listed_txt = f" · listed {s['listing_date']}" if s.get("listing_date") else ""
     html(f"""<div class="lx-card dd-head">
       <div style="display:flex;gap:14px;align-items:center">
@@ -838,7 +854,7 @@ def page_deepdive():
     k1.metric("Price", f"${fmt(q['price'])}",
               f"{q['daily_change_pct']:+.2f}% today" if q["daily_change_pct"] is not None else None)
     k2.metric("YTD", f"{fmt(q['ytd_change_pct'], '{:+.2f}')}%" if q["ytd_change_pct"] is not None else "-")
-    k3.metric("Market cap", fmt(q["market_cap"], "${:,.0f}"))
+    k3.metric("Market cap", fmt_money_compact(q["market_cap"]))
     k4.metric("Div. yield 12m", f"{fmt(y['total_yield_pct'])}%")
     k5.metric("P/E", fmt(r.get("pe")) if r else "-")
     an = deep_analytics(nemo)
@@ -1040,12 +1056,12 @@ def page_deepdive():
     if eq["cfo"] is not None:
         st.subheader("Earnings quality (cash flow)")
         qc = st.columns(5)
-        qc[0].metric("Operating cash flow", fmt(eq["cfo"], "${:,.0f}"))
+        qc[0].metric("Operating cash flow", fmt_money_compact(eq["cfo"]))
         qc[1].metric("Cash conversion", f"{fmt(eq['cash_conversion_pct'], '{:,.0f}')}%" if eq["cash_conversion_pct"] is not None else "-",
                      help="Operating cash flow / net income — near or above 100% means earnings are backed by cash")
-        qc[2].metric("Free cash flow", fmt(eq["fcf"], "${:,.0f}") if eq["fcf"] is not None else "-",
+        qc[2].metric("Free cash flow", fmt_money_compact(eq["fcf"]) if eq["fcf"] is not None else "-",
                      help="Operating cash flow − capital expenditures")
-        qc[3].metric("Dividends paid", fmt(abs(eq["dividends_paid"]), "${:,.0f}") if eq["dividends_paid"] else "-")
+        qc[3].metric("Dividends paid", fmt_money_compact(abs(eq["dividends_paid"])) if eq["dividends_paid"] else "-")
         qc[4].metric("Dividend coverage", f"{fmt(eq['div_coverage_x'])}x" if eq["div_coverage_x"] is not None else "-",
                      help="Operating cash flow / dividends paid — above 1x means dividends are cash-funded")
         cc = eq["cash_conversion_pct"]
@@ -1153,7 +1169,7 @@ def _view_refined(comp, local_set):
              ("Market cap · median", med("market_cap"), None, "$", False)]
     for col, (label, mval, lval, unit, higher_better) in zip(cols, specs):
         if unit == "$":
-            col.metric(label, fmt(mval, "${:,.0f}"))
+            col.metric(label, fmt_money_compact(mval))
         else:
             delta = None
             if lval is not None and mval:
@@ -1191,7 +1207,7 @@ def _view_map(comp, local_set, prefix=""):
 
 
 def _view_relative(comp, local_set, prefix=""):
-    metrics = [("market_cap", "Market cap", "${:,.0f}"), ("pe", "P/E", "{:.1f}x"),
+    metrics = [("market_cap", "Market cap", None), ("pe", "P/E", "{:.1f}x"),
                ("pb", "P/B", "{:.2f}x"), ("roe_pct", "ROE %", "{:.1f}%"),
                ("div_yield_pct", "Div yield %", "{:.1f}%")]
     grid = st.columns(2)
@@ -1200,8 +1216,9 @@ def _view_relative(comp, local_set, prefix=""):
         if d.empty:
             continue
         colors = [AZUL if t in local_set else "#CBD5E1" for t in d["ticker"]]
+        labels = [fmt_money_compact(v) if pat is None else pat.format(v) for v in d[col]]
         fig = go.Figure(go.Bar(x=d[col], y=d["ticker"], orientation="h", marker_color=colors,
-                               text=[pat.format(v) for v in d[col]], textposition="outside"))
+                               text=labels, textposition="outside"))
         fig.add_vline(x=d[col].median(), line=dict(color=ROJO, dash="dash", width=1))
         with grid[i % 2]:
             st.plotly_chart(style_fig(fig, 300, label), width="stretch",
