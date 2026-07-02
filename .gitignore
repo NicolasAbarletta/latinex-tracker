@@ -12,3 +12,4 @@ __pycache__/
 latinex_tracker.py
 *.log
 melo_fix*.log
+private/

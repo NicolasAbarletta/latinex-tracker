@@ -509,6 +509,132 @@ def sw_html(strengths, weaknesses):
 </div>"""
 
 
+def _stars_txt(n):
+    return ("★" * n + "☆" * (5 - n)) if n else "—"
+
+
+_RATING_COLORS = {"Wide": VERDE, "Narrow": AZUL, "None": GRIS,
+                  "Low": VERDE, "Medium": AZUL, "High": AMBER, "Very High": ROJO,
+                  "Exemplary": VERDE, "Standard": AZUL, "Poor": ROJO}
+
+
+def report_header_html(rep):
+    fv = rep.get("fair_value") or {}
+    price = rep.get("price_at_report")
+    p_fv = round(price / fv["mid"], 2) if (price and fv.get("mid")) else None
+    moat = (rep.get("moat") or {}).get("rating", "—")
+    unc = (rep.get("uncertainty") or {}).get("rating", "—")
+    ca = (rep.get("capital_allocation") or {}).get("rating", "—")
+
+    def cell(label, value, color=AZUL, sub=""):
+        return (f"<div style='flex:1;min-width:130px;background:#fff;border:1px solid #E2E8F0;"
+                f"border-radius:12px;padding:12px 14px;box-shadow:0 1px 3px rgba(11,61,102,.06)'>"
+                f"<div style='font-size:10.5px;color:#64748B;font-weight:700;text-transform:uppercase;"
+                f"letter-spacing:.04em'>{label}</div>"
+                f"<div style='font-size:19px;font-weight:800;color:{color};margin-top:5px'>{value}</div>"
+                f"<div style='font-size:10.5px;color:#94A3B8;margin-top:3px'>{sub}</div></div>")
+
+    cells = [
+        cell("Fair value est.", f"${fv.get('mid', '—')}",
+             AZUL, f"range ${fv.get('low', '—')} – ${fv.get('high', '—')}"),
+        cell("Price / Fair value", p_fv if p_fv is not None else "—",
+             (ROJO if (p_fv or 0) > 1.15 else VERDE if (p_fv or 9) < 0.85 else AZUL),
+             f"price ${price}"),
+        cell("Rating", _stars_txt(rep.get("stars")), "#B45309", "price vs. fair value"),
+        cell("Economic moat", moat, _RATING_COLORS.get(moat, AZUL), ""),
+        cell("Uncertainty", unc, _RATING_COLORS.get(unc, AZUL), ""),
+        cell("Capital allocation", ca, _RATING_COLORS.get(ca, AZUL), ""),
+    ]
+    return ("<div style='display:flex;gap:12px;flex-wrap:wrap;margin:14px 0 6px'>"
+            + "".join(cells) + "</div>")
+
+
+def bulls_bears_html(bulls, bears):
+    def items(lst, ic_cls, mark):
+        return "".join(f"<li><span class='ic {ic_cls}'>{mark}</span><div>{b}</div></li>"
+                       for b in lst)
+    return f"""
+<div class="sw-grid">
+  <div class="sw"><h4><span class="dot" style="background:{VERDE}"></span>Bulls say</h4>
+    <ul>{items(bulls, 'good-ic', '▲')}</ul></div>
+  <div class="sw"><h4><span class="dot" style="background:{ROJO}"></span>Bears say</h4>
+    <ul>{items(bears, 'bad-ic', '▼')}</ul></div>
+</div>"""
+
+
+def build_tear_sheet(nemo, e, rep, an):
+    """Self-contained, print-ready HTML report (browser -> print -> PDF)."""
+    q = e.get("quote") or {}
+    fv = rep.get("fair_value") or {}
+    tr, dp, lq, eq_, vb = an["tr"], an["dp"], an["lq"], an["eq"], an["vb"]
+    ht = (e.get("historical") or {}).get("table")
+    ni_years = ""
+    if ht is not None:
+        row = ht[ht["Metric"] == "Net income"]
+        if not row.empty:
+            cells = "".join(
+                f"<td style='text-align:right'>{fmt_money_compact(row.iloc[0][c])}</td>"
+                for c in ht.columns if str(c).startswith("FY"))
+            heads = "".join(f"<th style='text-align:right'>{c}</th>"
+                            for c in ht.columns if str(c).startswith("FY"))
+            ni_years = f"<tr><th>Net income</th>{heads}</tr><tr><td></td>{cells}</tr>"
+    segs = "".join(
+        f"<li><b>{s.get('name')}</b>"
+        + (f" ({s['revenue_share_pct']}% of revenue)" if s.get("revenue_share_pct") else "")
+        + f" — {s.get('detail', '')}</li>" for s in rep.get("segments", []))
+    comps = "".join(
+        f"<li><b>{c.get('area')}</b>: {', '.join(c.get('names', []))} — {c.get('positioning', '')}</li>"
+        for c in rep.get("competitors", []))
+    bulls = "".join(f"<li>{b}</li>" for b in rep.get("bulls_say", []))
+    bears = "".join(f"<li>{b}</li>" for b in rep.get("bears_say", []))
+    wc = (e.get("whats_changed") or {}).get("text", "")
+    from datetime import datetime as _dt
+    return f"""<!DOCTYPE html><html><head><meta charset="utf-8">
+<title>{nemo} — Company Report</title>
+<style>
+ body{{font-family:'Segoe UI',Arial,sans-serif;color:#1A202C;max-width:840px;margin:24px auto;padding:0 18px;font-size:13.5px;line-height:1.55}}
+ h1{{color:#0B3D66;margin-bottom:2px}} h2{{color:#0B3D66;border-bottom:2px solid #DBEAFE;padding-bottom:4px;margin-top:26px;font-size:17px}}
+ .grid{{display:flex;gap:10px;flex-wrap:wrap;margin:14px 0}}
+ .cell{{flex:1;min-width:120px;border:1px solid #E2E8F0;border-radius:10px;padding:10px 12px}}
+ .cell .l{{font-size:10px;color:#64748B;text-transform:uppercase;font-weight:700}}
+ .cell .v{{font-size:17px;font-weight:800;color:#0B3D66;margin-top:3px}}
+ table{{border-collapse:collapse;width:100%}} th,td{{padding:6px 10px;border-bottom:1px solid #EDF2F7;font-size:12.5px}}
+ ul{{padding-left:20px}} li{{margin-bottom:5px}}
+ .muted{{color:#64748B;font-size:11px}}
+ @media print {{ body{{margin:8px auto}} }}
+</style></head><body>
+<h1>{q.get('issuer_name') or nemo} ({nemo})</h1>
+<div class="muted">Latinex · Panama · report generated {_dt.now().strftime('%Y-%m-%d')} · source filing: {rep.get('source_report', '')}</div>
+<div class="grid">
+ <div class="cell"><div class="l">Price</div><div class="v">${q.get('price')}</div></div>
+ <div class="cell"><div class="l">Fair value</div><div class="v">${fv.get('mid', '—')}</div><div class="muted">${fv.get('low')} – ${fv.get('high')}</div></div>
+ <div class="cell"><div class="l">Rating</div><div class="v">{_stars_txt(rep.get('stars'))}</div></div>
+ <div class="cell"><div class="l">Moat</div><div class="v">{(rep.get('moat') or {}).get('rating', '—')}</div></div>
+ <div class="cell"><div class="l">Uncertainty</div><div class="v">{(rep.get('uncertainty') or {}).get('rating', '—')}</div></div>
+ <div class="cell"><div class="l">Capital allocation</div><div class="v">{(rep.get('capital_allocation') or {}).get('rating', '—')}</div></div>
+</div>
+<h2>Business</h2><p>{rep.get('business_description', '')}</p>
+<h3>Lines of business</h3><ul>{segs}</ul>
+<h3>Competition <span class="muted">(analyst market knowledge, not from filings)</span></h3><ul>{comps}</ul>
+<h2>Analyst thesis</h2><p>{rep.get('thesis', '')}</p>
+{f'<p><b>What changed this quarter:</b> {wc}</p>' if wc else ''}
+<h2>Bulls say</h2><ul>{bulls}</ul>
+<h2>Bears say</h2><ul>{bears}</ul>
+<h2>Fair value methodology</h2><p>{fv.get('methods', '')}</p>
+<h2>Key figures</h2>
+<table>{ni_years}</table>
+<div class="grid">
+ <div class="cell"><div class="l">ROE</div><div class="v">{(rep.get('anchors') or {}).get('roe_pct', '—')}%</div></div>
+ <div class="cell"><div class="l">P/E</div><div class="v">{(rep.get('anchors') or {}).get('pe_now', '—')}x</div></div>
+ <div class="cell"><div class="l">Yield (TTM)</div><div class="v">{dp.get('ttm_yield_pct', '—')}%</div></div>
+ <div class="cell"><div class="l">Cash conversion</div><div class="v">{eq_.get('cash_conversion_pct', '—')}%</div></div>
+ <div class="cell"><div class="l">Total return 1y</div><div class="v">{tr.get('tr_1y_pct', '—')}%</div></div>
+ <div class="cell"><div class="l">Liquidity</div><div class="v">{lq.get('grade', '—')}</div></div>
+</div>
+<p class="muted">Figures parsed from audited Latinex filings via Claude vision; analytics computed from prices and dividend history. Fair value and ratings are model-generated estimates, not investment advice. Verify against source PDFs before acting.</p>
+</body></html>"""
+
+
 def roe_tree_svg(d, peer_roe_median=None):
     """Build the ROE/DuPont tree as inline SVG from a dupont_decomposition dict."""
     def v(x, suf="%"):
@@ -863,14 +989,66 @@ def page_deepdive():
 
     if dd.get("error"):
         st.warning(dd["error"])
-    if data.get("executive_summary"):
-        html(f"<p style='font-size:14px;color:#475569;line-height:1.6;margin:16px 0 4px;"
-             f"max-width:1000px'>{data['executive_summary']}</p>")
-    if data.get("scorecard"):
-        html(scorecard_html(data["scorecard"]))
-    if data.get("strengths") and data.get("weaknesses"):
-        st.write("")
-        html(sw_html(data["strengths"], data["weaknesses"]))
+
+    # ----- Morningstar-style report (precomputed offline) -----
+    rep = _tk(nemo).get("report") or {}
+    if rep.get("fair_value"):
+        html(report_header_html(rep))
+        st.download_button(
+            "⬇ Download company report (HTML → print to PDF)",
+            data=build_tear_sheet(nemo, _tk(nemo), rep, an),
+            file_name=f"{nemo}_report.html", mime="text/html")
+        st.subheader("Business")
+        html(f"<p style='font-size:14px;color:#475569;line-height:1.65;max-width:1000px'>"
+             f"{rep.get('business_description', '')}</p>")
+        segs = rep.get("segments") or []
+        if segs:
+            shares = [s.get("revenue_share_pct") for s in segs]
+            sc1, sc2 = st.columns([1, 1.4]) if any(shares) else (None, st.container())
+            if any(shares):
+                with sc1:
+                    known = [s for s in segs if s.get("revenue_share_pct")]
+                    fig = go.Figure(go.Pie(
+                        labels=[s["name"] for s in known],
+                        values=[s["revenue_share_pct"] for s in known], hole=0.55,
+                        marker=dict(colors=[AZUL, "#2563EB", VERDE, AMBER, GRIS, ROJO])))
+                    st.plotly_chart(style_fig(fig, 280, "Revenue by segment"),
+                                    width="stretch", key=f"seg_{nemo}")
+            with sc2:
+                html("".join(
+                    f"<div style='background:#fff;border:1px solid #E2E8F0;border-radius:10px;"
+                    f"padding:9px 13px;margin-bottom:7px;font-size:13px'>"
+                    f"<b style='color:{AZUL}'>{s.get('name')}</b>"
+                    + (f" <span style='color:{VERDE};font-weight:700'>· {s['revenue_share_pct']}%</span>"
+                       if s.get("revenue_share_pct") else "")
+                    + f"<div style='color:#475569;margin-top:2px'>{s.get('detail', '')}</div></div>"
+                    for s in segs))
+        comps = rep.get("competitors") or []
+        if comps:
+            with st.expander("Competition (analyst market knowledge, not from filings)"):
+                for c in comps:
+                    st.markdown(f"- **{c.get('area')}**: {', '.join(c.get('names', []))} — "
+                                f"{c.get('positioning', '')}")
+        if rep.get("bulls_say") and rep.get("bears_say"):
+            html(bulls_bears_html(rep["bulls_say"], rep["bears_say"]))
+        if rep.get("thesis"):
+            html(f"<div class='lx-callout' style='margin-top:14px'><div class='ic'>✎</div>"
+                 f"<div><b>Analyst thesis</b><br>{rep['thesis']}</div></div>")
+        st.caption(f"Fair value methodology: {(rep.get('fair_value') or {}).get('methods', '')} "
+                   f"Ratings and fair value are model-generated estimates from verified filing "
+                   f"data — not investment advice.")
+        if data.get("scorecard"):
+            html(scorecard_html(data["scorecard"]))
+    else:
+        # fall back to the original deep-dive summary blocks
+        if data.get("executive_summary"):
+            html(f"<p style='font-size:14px;color:#475569;line-height:1.6;margin:16px 0 4px;"
+                 f"max-width:1000px'>{data['executive_summary']}</p>")
+        if data.get("scorecard"):
+            html(scorecard_html(data["scorecard"]))
+        if data.get("strengths") and data.get("weaknesses"):
+            st.write("")
+            html(sw_html(data["strengths"], data["weaknesses"]))
 
     # ----- What changed this quarter (precomputed at build time) -----
     wc = _tk(nemo).get("whats_changed") or {}
