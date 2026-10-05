@@ -1,0 +1,36 @@
+name: Vigilante hechos de importancia Latinex
+
+on:
+  schedule:
+    # Cada 20 min, lunes a viernes, 6:00-20:59 hora de Panama (UTC-5)
+    - cron: "*/20 11-23 * * 1-5"
+    - cron: "*/20 0-1 * * 2-6"
+  workflow_dispatch:
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: watch_notices.py
+          sparse-checkout-cone-mode: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install requests
+      - uses: actions/cache/restore@v4
+        with:
+          path: data/watch_state.json
+          key: watch-state-${{ github.run_id }}
+          restore-keys: watch-state-
+      - run: python watch_notices.py
+        env:
+          WATCH_KEYWORDS: ARROCHA
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+      - uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: data/watch_state.json
+          key: watch-state-${{ github.run_id }}

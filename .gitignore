@@ -13,3 +13,4 @@ latinex_tracker.py
 *.log
 melo_fix*.log
 private/
+data/watch_state.json
