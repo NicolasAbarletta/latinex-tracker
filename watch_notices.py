@@ -79,6 +79,30 @@ def viewer_url(pdf_url):
     return "https://docs.google.com/viewer?embedded=true&url=" + quote(pdf_url, safe="")
 
 
+def ntfy_topic():
+    topic = os.getenv("NTFY_TOPIC", "").strip()
+    if not topic:
+        try:
+            with open(os.path.join(HERE, ".ntfy_topic"), encoding="utf-8") as f:
+                topic = f.read().strip()
+        except OSError:
+            pass
+    return topic
+
+
+def already_sent(topic, message):
+    """The GitHub Actions runner and the local backup keep separate state; ntfy's
+    12h message cache is the shared record so the same filing is pushed once."""
+    try:
+        resp = requests.get(f"https://ntfy.sh/{topic}/json",
+                            params={"poll": "1", "since": "12h"}, timeout=30)
+        resp.raise_for_status()
+        return any(json.loads(line).get("message") == message
+                   for line in resp.text.splitlines() if line.strip())
+    except (requests.RequestException, ValueError):
+        return False
+
+
 def notify_ntfy(topic, title, message, url="", hot=False):
     body = {"topic": topic, "title": title, "message": message,
             "priority": 5 if hot else 4, "tags": ["rotating_light" if hot else "bell"]}
@@ -110,9 +134,12 @@ def send(item, dry=False):
     print(f"[NUEVO{' - PRIORIDAD' if hot else ''}] {message}\n  {item['url']}", flush=True)
     if dry:
         return
-    topic = os.getenv("NTFY_TOPIC", "").strip()
+    topic = ntfy_topic()
     if topic:
-        notify_ntfy(topic, title, message, item["url"], hot)
+        if already_sent(topic, message):
+            print("  (ya notificado por el otro vigilante; no se reenvia)", flush=True)
+        else:
+            notify_ntfy(topic, title, message, item["url"], hot)
     if os.getenv("WATCH_TOAST") == "1" and sys.platform.startswith("win"):
         notify_toast(title, message)
 
@@ -153,4 +180,9 @@ def main():
 
 
 if __name__ == "__main__":
+    if sys.stdout is None:  # pythonw (Task Scheduler): no console
+        os.makedirs(os.path.join(HERE, "data"), exist_ok=True)
+        sys.stdout = sys.stderr = open(os.path.join(HERE, "data", "watch.log"), "a",
+                                       encoding="utf-8")
+        print(f"--- {datetime.now().isoformat(timespec='seconds')}", flush=True)
     main()

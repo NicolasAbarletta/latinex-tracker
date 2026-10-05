@@ -14,3 +14,4 @@ latinex_tracker.py
 melo_fix*.log
 private/
 data/watch_state.json
+.ntfy_topic
