@@ -2,9 +2,10 @@ name: Vigilante hechos de importancia Latinex
 
 on:
   schedule:
-    # Cada 20 min, lunes a viernes, 6:00-20:59 hora de Panama (UTC-5)
-    - cron: "*/20 11-23 * * 1-5"
-    - cron: "*/20 0-1 * * 2-6"
+    # Cada 20 min (min 7/27/47, fuera de los picos de :00), lunes a viernes,
+    # 6:00-20:59 hora de Panama (UTC-5)
+    - cron: "7,27,47 11-23 * * 1-5"
+    - cron: "7,27,47 0-1 * * 2-6"
   workflow_dispatch:
 
 jobs:
