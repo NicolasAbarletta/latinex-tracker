@@ -112,8 +112,16 @@ def send(item, dry=False):
 def main():
     dry = "--dry" in sys.argv
     if "--test" in sys.argv:
-        send({"date": datetime.now().strftime("%d/%m/%Y"), "issuer": "PRUEBA",
-              "title": "Notificacion de prueba del vigilante de Latinex", "url": FEED_URL})
+        # Re-send the most recent real matching filing, labeled as a test, so the
+        # notification looks (and links) exactly like a live alert would.
+        matches = fetch_matches()
+        if matches:
+            sample = dict(matches[0])
+            sample["title"] = f"[PRUEBA] {sample['title']}"
+        else:
+            sample = {"date": datetime.now().strftime("%d/%m/%Y"), "issuer": "PRUEBA",
+                      "title": "Notificacion de prueba del vigilante de Latinex", "url": ""}
+        send(sample)
         return
 
     matches = fetch_matches()
