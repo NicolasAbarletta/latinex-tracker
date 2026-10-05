@@ -72,12 +72,20 @@ def save_state(state):
         json.dump(state, f, ensure_ascii=False, indent=1)
 
 
+def viewer_url(pdf_url):
+    """Latinex serves PDFs as application/octet-stream (forces a download, and
+    Chrome on Android has no inline PDF viewer); Google's viewer renders them
+    as a web page instead."""
+    return "https://docs.google.com/viewer?embedded=true&url=" + quote(pdf_url, safe="")
+
+
 def notify_ntfy(topic, title, message, url="", hot=False):
     body = {"topic": topic, "title": title, "message": message,
             "priority": 5 if hot else 4, "tags": ["rotating_light" if hot else "bell"]}
     if url:
-        body["click"] = url
-        body["actions"] = [{"action": "view", "label": "Abrir PDF", "url": url}]
+        body["click"] = viewer_url(url)
+        body["actions"] = [{"action": "view", "label": "Ver PDF", "url": viewer_url(url)},
+                           {"action": "view", "label": "Descargar", "url": url}]
     requests.post("https://ntfy.sh/", json=body, timeout=30).raise_for_status()
 
 
